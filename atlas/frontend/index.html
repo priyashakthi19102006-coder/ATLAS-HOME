@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ATLAS Home — Continuous Physical Safety Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Premium Product Header -->
+    <header class="header">
+      <div class="header-brand">
+        <div class="logo-mark">A</div>
+        <div>
+          <div class="brand-row">
+            <h1 class="title">ATLAS HOME</h1>
+            <span class="role-badge" id="header-role-badge">ADMIN / VERIFIED</span>
+          </div>
+          <p class="subtitle" id="header-subtitle">Continuous Physical Safety Intelligence • Residential Perimeter Protection</p>
+        </div>
+      </div>
+
+      <!-- Center Status Indicators (Admin View) -->
+      <div class="header-center-indicators" id="header-indicators">
+        <div class="status-indicator-pill" id="stat-sys-online">
+          <span class="status-dot dot-live"></span>
+          <span class="indicator-text">SYSTEM ONLINE</span>
+        </div>
+        <div class="status-indicator-pill" id="stat-proc-live">
+          <span class="status-dot dot-live"></span>
+          <span class="indicator-text">PROCESSING LIVE</span>
+        </div>
+        <div class="status-indicator-pill" id="stat-llm-health">
+          <span class="status-dot dot-ai"></span>
+          <span class="indicator-text" id="stat-llm-text">LLM HEALTH: OPERATIONAL</span>
+        </div>
+      </div>
+
+      <!-- Right Auth Bar & Synchronization -->
+      <div class="header-status">
+        <div class="user-auth-bar" id="user-auth-bar">
+          <div id="user-logged-in" class="user-profile-widget" style="display: none;">
+            <span class="user-role-tag" id="user-role-badge">ADMIN</span>
+            <span class="user-name-tag" id="user-display-name">Administrator</span>
+            <button id="btn-logout" class="btn btn-outline-danger btn-xs" type="button">LOGOUT</button>
+          </div>
+          <div id="user-logged-out" class="user-login-prompt">
+            <span class="unauth-role-tag">GUEST (READ-ONLY)</span>
+            <button id="btn-open-login" class="btn btn-primary btn-xs" type="button">SIGN IN</button>
+          </div>
+        </div>
+        <div class="status-timestamp">
+          <span class="ts-label">BACKEND SYNC:</span>
+          <span id="last-sync-time" class="ts-value">Live</span>
+        </div>
+        <div id="connection-badge" class="badge badge-loading">
+          <span class="pulse-dot"></span>
+          <span id="connection-text">LOADING</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Operational Boundary Notice -->
+    <div class="boundary-banner" id="boundary-banner">
+      <div class="boundary-icon">🛡️</div>
+      <div class="boundary-text">
+        <strong>OPERATIONAL SAFETY BOUNDARY:</strong>
+        <span class="formula">DETECTED ≠ VERIFIED ≠ ACTION AUTHORIZED</span>
+        <span class="boundary-sub">• External emergency dispatch is strictly disabled at this stage.</span>
+      </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- VIEW 1: ADMIN DASHBOARD (Sections A through J)                         -->
+    <!-- ===================================================================== -->
+    <div id="view-admin-dashboard" class="dashboard-view">
+
+      <!-- Row 1: Section A (Overview) & Section B (Live) -->
+      <div class="admin-grid-top">
+        <!-- Section A: Home Overview -->
+        <section class="card section-overview">
+          <div class="card-header">
+            <h2>A. HOME OVERVIEW</h2>
+            <span class="device-pill" id="device-id-label">atlas_home_01</span>
+          </div>
+          <div class="card-body">
+            <div class="kpi-row">
+              <div class="kpi-card" id="kpi-perimeter">
+                <span class="kpi-label">PERIMETER STATUS</span>
+                <span class="kpi-value text-green" id="kpi-perimeter-val">SECURE</span>
+              </div>
+              <div class="kpi-card" id="kpi-threat">
+                <span class="kpi-label">THREAT LEVEL</span>
+                <span class="kpi-value text-cyan" id="kpi-threat-val">LOW</span>
+              </div>
+              <div class="kpi-card" id="kpi-incidents">
+                <span class="kpi-label">ACTIVE INCIDENTS</span>
+                <span class="kpi-value" id="kpi-incidents-val">0</span>
+              </div>
+              <div class="kpi-card" id="kpi-users">
+                <span class="kpi-label">VERIFIED OCCUPANTS</span>
+                <span class="kpi-value text-green" id="kpi-users-val">1 PRESENT</span>
+              </div>
+            </div>
+
+            <!-- Subsystems Matrix -->
+            <div class="subsystems-heading">CORE SUBSYSTEMS STATUS</div>
+            <div class="subsystems-grid" id="subsystems-container">
+              <div class="subsystem-item"><span class="sub-label">Backend Service</span><span class="sub-val" id="sub-backend">ONLINE</span></div>
+              <div class="subsystem-item"><span class="sub-label">Physical Camera</span><span class="sub-val" id="sub-camera">LIVE</span></div>
+              <div class="subsystem-item"><span class="sub-label">Perception Engine</span><span class="sub-val" id="sub-perception">ACTIVE</span></div>
+              <div class="subsystem-item"><span class="sub-label">Intelligence (LLM)</span><span class="sub-val" id="sub-intelligence">ACTIVE</span></div>
+              <div class="subsystem-item"><span class="sub-label">Deterministic Rules</span><span class="sub-val" id="sub-rules">ACTIVE</span></div>
+              <div class="subsystem-item"><span class="sub-label">Risk Assessment</span><span class="sub-val" id="sub-risk">ACTIVE</span></div>
+              <div class="subsystem-item"><span class="sub-label">Incident Lifecycle</span><span class="sub-val" id="sub-incidents">READY</span></div>
+              <div class="subsystem-item"><span class="sub-label">Alert Correlation</span><span class="sub-val" id="sub-alerts">STANDBY</span></div>
+              <div class="subsystem-item"><span class="sub-label">Orchestrator Boundary</span><span class="sub-val" id="sub-orchestrator">ENFORCED</span></div>
+            </div>
+
+            <!-- AI & Situational Summary -->
+            <div class="overview-situation-box">
+              <div class="box-title-row">
+                <span class="field-label">AI SITUATIONAL REASONING</span>
+                <span class="badge" id="llm-status-badge">STANDBY</span>
+              </div>
+              <p class="overview-summary-text" id="llm-situation">Continuous safety monitoring active. Normal home state.</p>
+              <div class="inv-meta-grid overview-ai-meta">
+                <div><span class="field-label">CONFIDENCE:</span> <strong id="llm-confidence">1.00</strong></div>
+                <div><span class="field-label">UNCERTAINTY:</span> <strong id="llm-uncertainty">LOW</strong></div>
+                <div><span class="field-label">VERIFIED:</span> <strong class="text-green" id="llm-verify-req">YES</strong></div>
+                <div><span class="field-label">MODEL:</span> <strong id="llm-model">qwen2.5:3b</strong></div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- Section B: Live -->
+        <section class="card section-live">
+          <div class="card-header">
+            <h2>B. LIVE CAMERA FEED</h2>
+            <span class="source-tag" id="camera-source-label">Camera: /dev/video0</span>
+          </div>
+          <div class="video-container">
+            <img id="camera-feed" src="/api/camera/video_feed" alt="Real Camera Feed" />
+            <div id="video-overlay" class="video-overlay hidden">
+              <div class="overlay-content">
+                <div class="overlay-icon">⚠️</div>
+                <h3 id="overlay-title">CAMERA DISCONNECTED</h3>
+                <p id="overlay-msg">No physical video frame received.</p>
+              </div>
+            </div>
+          </div>
+          <div class="feed-footer">
+            <div class="metric-pill">
+              <span class="metric-label">FPS</span>
+              <span class="metric-val" id="metric-fps">0.0</span>
+            </div>
+            <div class="metric-pill">
+              <span class="metric-label">RESOLUTION</span>
+              <span class="metric-val" id="metric-resolution">640x480</span>
+            </div>
+            <div class="metric-pill">
+              <span class="metric-label">PERSONS IN VIEW</span>
+              <span class="metric-val" id="metric-people-count">0</span>
+            </div>
+            <div class="metric-pill">
+              <span class="metric-label">OBJECTS IN VIEW</span>
+              <span class="metric-val" id="metric-objects-count">0</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Row 2: Section C (People) & Section D (Activity) -->
+      <div class="admin-grid-two">
+        <!-- Section C: People -->
+        <section class="card section-people">
+          <div class="card-header">
+            <h2>C. OBSERVED PEOPLE</h2>
+            <span class="counter-badge" id="admin-people-count">0 TRACKED</span>
+          </div>
+          <div class="card-body scrollable-card-body">
+            <div id="admin-people-list" class="people-grid">
+              <div class="empty-state" id="no-people-msg">No persons observed in perimeter.</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section D: Activity -->
+        <section class="card section-activity">
+          <div class="card-header">
+            <h2>D. ACTIVITY FEED</h2>
+            <span class="counter-badge" id="events-count-badge">0 RECENT</span>
+          </div>
+          <div class="card-body scrollable-card-body">
+            <table class="events-table">
+              <thead>
+                <tr>
+                  <th>TIME</th>
+                  <th>EVENT</th>
+                  <th>TRACK</th>
+                  <th>CONF</th>
+                  <th>STATUS</th>
+                </tr>
+              </thead>
+              <tbody id="events-tbody">
+                <tr><td colspan="5" class="empty-table">Awaiting events from perception engine...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- Row 3: Section E (Objects) & Section F (Incidents) -->
+      <div class="admin-grid-two">
+        <!-- Section E: Objects -->
+        <section class="card section-objects">
+          <div class="card-header">
+            <h2>E. OBJECT TRACKING</h2>
+            <span class="counter-badge" id="admin-objects-count">0 OBJECTS</span>
+          </div>
+          <div class="card-body scrollable-card-body">
+            <div id="admin-objects-list" class="objects-grid">
+              <div class="empty-state" id="no-objects-msg">No objects detected in perimeter.</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section F: Incidents -->
+        <section class="card section-incidents">
+          <div class="card-header">
+            <h2>F. SECURITY INCIDENTS</h2>
+            <span class="counter-badge" id="active-incidents-count">0 ACTIVE</span>
+          </div>
+          <div class="card-body scrollable-card-body">
+            <div class="incidents-container" id="incidents-list">
+              <div class="empty-state" id="no-incidents-msg">NO ACTIVE INCIDENTS</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Row 4: Section G (Evidence) & Section H (Login Activity) -->
+      <div class="admin-grid-two">
+        <!-- Section G: Evidence -->
+        <section class="card section-evidence">
+          <div class="card-header">
+            <h2>G. CRYPTOGRAPHIC EVIDENCE VAULT</h2>
+            <span class="counter-badge" id="admin-evidence-count">0 ARTIFACTS</span>
+          </div>
+          <div class="card-body scrollable-card-body">
+            <div id="admin-evidence-list" class="evidence-grid">
+              <div class="empty-state" id="no-evidence-msg">No captured evidence records.</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section H: Login Activity -->
+        <section class="card section-logins">
+          <div class="card-header">
+            <h2>H. LOGIN ACTIVITY</h2>
+            <span class="counter-badge" id="admin-logins-count">0 ATTEMPTS</span>
+          </div>
+          <div class="card-body scrollable-card-body">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>TIME</th>
+                  <th>USER</th>
+                  <th>ROLE</th>
+                  <th>STATUS</th>
+                  <th>IP</th>
+                  <th>FACE CONF</th>
+                </tr>
+              </thead>
+              <tbody id="admin-logins-tbody">
+                <tr><td colspan="6" class="empty-table">No recent login records.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- Row 5: Section I (Audit) -->
+      <section class="card section-audit">
+        <div class="card-header">
+          <h2>I. IMMUTABLE SECURITY AUDIT TRAIL</h2>
+          <span class="counter-badge" id="admin-audit-count">0 AUDIT RECORDS</span>
+        </div>
+        <div class="card-body scrollable-card-body">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>TIMESTAMP</th>
+                <th>ACTOR</th>
+                <th>ACTION</th>
+                <th>TARGET</th>
+                <th>STATE TRANSITION</th>
+                <th>REASON</th>
+              </tr>
+            </thead>
+            <tbody id="admin-audit-tbody">
+              <tr><td colspan="6" class="empty-table">No audit records logged.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Row 6: Section J (User Management - 10 Slots) -->
+      <section class="card section-users">
+        <div class="card-header user-mgr-header">
+          <div>
+            <h2>J. USER MANAGEMENT</h2>
+            <span class="subtitle-text">Authorized Identity Slots (Strict limit: 1 Admin, max 10 Authorized Users)</span>
+          </div>
+          <div class="user-slots-stats" id="admin-user-slots-summary">
+            <span class="badge badge-live" id="slots-occupied-pill">1 / 10 SLOTS OCCUPIED</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="slots-grid" id="admin-user-slots-grid">
+            <!-- 10 Slots dynamically rendered by app.js -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Row 7: Section K (Notifications & Escalation) -->
+      <section class="card section-notifications">
+        <div class="card-header">
+          <div>
+            <h2>K. NOTIFICATIONS & ESCALATION</h2>
+            <span class="subtitle-text">Authoritative incident notification dispatch, escalation progression & provider telemetry</span>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <span class="badge badge-disconnected" id="admin-mobile-provider-pill">MOBILE PUSH: NOT CONFIGURED</span>
+            <span class="counter-badge" id="admin-notifs-count">0 NOTIFICATIONS</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="notif-providers-row" id="admin-providers-row" style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
+            <!-- Providers cards rendered by app.js -->
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="admin-notifs-table">
+              <thead>
+                <tr>
+                  <th>TIME</th>
+                  <th>INCIDENT</th>
+                  <th>RECIPIENT</th>
+                  <th>CHANNEL</th>
+                  <th>LEVEL</th>
+                  <th>DELIVERY STATE</th>
+                  <th>RETRIES</th>
+                  <th>ACKNOWLEDGEMENT</th>
+                </tr>
+              </thead>
+              <tbody id="admin-notifs-tbody">
+                <tr><td colspan="8" class="empty-table">No notification events recorded.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- End Admin Dashboard -->
+
+
+    <!-- ===================================================================== -->
+    <!-- VIEW 2: AUTHORIZED USER DASHBOARD                                     -->
+    <!-- ===================================================================== -->
+    <div id="view-auth-dashboard" class="dashboard-view" style="display: none;">
+      
+      <!-- Screen 1: Home Status -->
+      <section class="card auth-home-status-card">
+        <div class="auth-status-hero">
+          <div class="auth-status-shield-wrap" id="auth-status-shield">
+            <span class="auth-shield-icon">🛡️</span>
+          </div>
+          <div class="auth-status-main">
+            <span class="auth-status-sub">RESIDENTIAL PERIMETER STATUS</span>
+            <h2 class="auth-status-title" id="auth-status-headline">PERIMETER SECURE</h2>
+            <p class="auth-status-desc" id="auth-status-description">
+              All monitored areas are normal. Continuous physical safety intelligence is actively monitoring the home perimeter.
+            </p>
+          </div>
+        </div>
+
+        <div class="auth-meta-row">
+          <div class="auth-meta-pill">
+            <span class="meta-label">SYSTEM MODE</span>
+            <strong class="meta-val" id="auth-mode-val">Continuous Physical Safety Monitoring</strong>
+          </div>
+          <div class="auth-meta-pill">
+            <span class="meta-label">SECURITY LEVEL</span>
+            <strong class="meta-val">Standard Residential</strong>
+          </div>
+          <div class="auth-meta-pill">
+            <span class="meta-label">CAMERA HARDWARE</span>
+            <strong class="meta-val text-green" id="auth-cam-val">Online / Active</strong>
+          </div>
+          <div class="auth-meta-pill">
+            <span class="meta-label">LAST CHECKED</span>
+            <strong class="meta-val" id="auth-checked-val">Just now</strong>
+          </div>
+        </div>
+      </section>
+
+      <!-- Screen 2: Active Alerts Section -->
+      <section class="card auth-alerts-section">
+        <div class="card-header">
+          <h2>ACTIVE SECURITY ALERTS</h2>
+          <span class="badge" id="auth-alerts-badge">ALL CLEAR</span>
+        </div>
+        <div class="card-body">
+          <div id="auth-alerts-container">
+            <!-- All Clear default card -->
+            <div class="auth-all-clear-card" id="auth-all-clear-card">
+              <div class="all-clear-icon">✓</div>
+              <h3>All Clear — No Active Security Alerts</h3>
+              <p>Monitoring perimeter continuously.</p>
+              <div class="auth-gating-note">
+                <span class="lock-icon">🔒</span>
+                <span>Live camera feed and evidence access are strictly gated and will automatically unlock if an active security incident occurs.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- End Authorized User Dashboard -->
+
+
+    <!-- ===================================================================== -->
+    <!-- VIEW 3: GUEST / UNLOGGED-IN DASHBOARD                                 -->
+    <!-- ===================================================================== -->
+    <div id="view-guest-dashboard" class="dashboard-view" style="display: none;">
+      <div class="guest-landing-container">
+        <div class="guest-hero-card">
+          <div class="guest-brand-badge">RESIDENTIAL SAFETY INTELLIGENCE</div>
+          <h1 class="guest-hero-title">ATLAS HOME SECURITY INTELLIGENCE</h1>
+          <p class="guest-hero-subtitle">Intelligent Human-Safety & Home Ecosystem</p>
+          
+          <div class="guest-system-status-row">
+            <div class="status-indicator-pill" id="landing-stat-cam">
+              <span class="status-dot dot-live"></span>
+              <span class="indicator-text">HARDWARE CAMERA: ACTIVE (30 FPS)</span>
+            </div>
+            <div class="status-indicator-pill" id="landing-stat-ai">
+              <span class="status-dot dot-ai"></span>
+              <span class="indicator-text">AI PERCEPTION CORE: OPERATIONAL</span>
+            </div>
+            <div class="status-indicator-pill" id="landing-stat-sec">
+              <span class="status-dot dot-live"></span>
+              <span class="indicator-text">SECURITY: 2-STAGE FAIL-CLOSED BIOMETRIC</span>
+            </div>
+          </div>
+
+          <div class="guest-action-buttons">
+            <button class="btn btn-primary btn-lg" id="btn-login-as-admin" type="button">
+              <span class="btn-icon">⚡</span> LOGIN AS ADMIN
+            </button>
+            <button class="btn btn-outline-cyan btn-lg" id="btn-login-as-user" type="button">
+              <span class="btn-icon">🛡️</span> LOGIN AS AUTHORIZED USER
+            </button>
+            <!-- Hidden compatibility alias for legacy test runners -->
+            <button class="btn btn-primary" id="btn-guest-login" type="button" style="display: none;">AUTHENTICATE OPERATOR</button>
+          </div>
+        </div>
+
+        <div class="guest-roles-grid">
+          <div class="card guest-role-card">
+            <div class="card-header">
+              <h3>ADMINISTRATOR DASHBOARD</h3>
+              <span class="badge badge-live">1 STRICT ADMIN SLOT</span>
+            </div>
+            <div class="card-body">
+              <p class="role-desc">Full physical security visibility, hardware camera telemetry, live object & human tracking, AI risk reasoning, security rule evaluations, immutable audit trail, and user management.</p>
+              <ul class="role-features">
+                <li>Perimeter situational awareness & live YOLO stream</li>
+                <li>Human activity classification & risk deliberation</li>
+                <li>Authoritative response escalation governance</li>
+                <li>Authorized User management (Up to 10 slots)</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card guest-role-card">
+            <div class="card-header">
+              <h3>AUTHORIZED USER DASHBOARD</h3>
+              <span class="badge badge-subtle">MAX 10 AUTHORIZED SLOTS</span>
+            </div>
+            <div class="card-body">
+              <p class="role-desc">Consumer-grade residential protection interface designed for household safety. Privacy-first perimeter status with strict alert-gated evidence access.</p>
+              <ul class="role-features">
+                <li>Clear, real-time perimeter status (Secure / Alert)</li>
+                <li>Actionable emergency safety notifications</li>
+                <li>Alert-gated incident camera evidence verification</li>
+                <li>Single-tap alert acknowledgement</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- End App Container -->
+
+
+  <!-- ========================================================================= -->
+  <!-- HIDDEN ELEMENTS FOR BACKWARD COMPATIBILITY WITH TEST HARNESSES            -->
+  <!-- ========================================================================= -->
+  <div style="display: none;" aria-hidden="true">
+    <div id="risk-score-val">0.00</div>
+    <div id="risk-score-fill"></div>
+    <div id="risk-level-badge">LOW</div>
+    <div id="risk-level-text">LOW</div>
+    <div id="risk-uncertainty-text">LOW</div>
+    <div id="risk-human-req-text">NO</div>
+    <div id="risk-reason-text">Normal</div>
+    <div id="orch-decision-badge">STANDBY</div>
+    <div id="orch-decision-text">STANDBY</div>
+    <div id="auth-state-text">NOT_ESCALATED</div>
+    <div id="auth-human-req-text">NO</div>
+    <div id="auth-notifications-count">0</div>
+    <div id="orch-reason-text">Standby</div>
+    <div id="auth-action-panel"></div>
+    <button id="btn-open-authorize"></button>
+    <div id="llm-interpretation">Normal home state</div>
+    <div id="notif-esc-badge"></div>
+    <div id="prov-status-inapp"></div>
+    <div id="prov-status-push"></div>
+    <div id="prov-status-email"></div>
+    <div id="notif-total-count">0</div>
+    <div id="notif-unread-count">0</div>
+    <div id="notif-active-esc-count">0</div>
+    <div id="notif-push-summary"></div>
+    <tbody id="notifications-tbody"></tbody>
+  </div>
+
+
+  <!-- ========================================================================= -->
+  <!-- MODALS                                                                    -->
+  <!-- ========================================================================= -->
+
+  <!-- Modal: Identity Authentication (2-Stage Fail-Closed Login) -->
+  <div class="modal-backdrop" id="modal-login" style="display: none;">
+    <div class="modal-dialog modal-login-dialog">
+      <!-- Stage Indicator Bar -->
+      <div class="login-stage-bar">
+        <div class="stage-step active" id="stage-step-1">
+          <span class="step-num">1</span>
+          <span class="step-label">CREDENTIALS</span>
+        </div>
+        <div class="stage-connector" id="stage-connector-bar"></div>
+        <div class="stage-step" id="stage-step-2">
+          <span class="step-num">2</span>
+          <span class="step-label">BIOMETRIC FACE</span>
+        </div>
+      </div>
+
+      <!-- Stage 1: Credentials -->
+      <div id="login-stage-credentials">
+        <div class="modal-header login-header">
+          <div class="login-brand">
+            <div class="logo-mark sm">A</div>
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <h3>ATLAS HOME IDENTITY</h3>
+                <span class="badge badge-live" id="login-role-badge">ADMIN</span>
+              </div>
+              <p class="login-sub" id="login-role-sub">Fail-closed authenticated residential access</p>
+            </div>
+          </div>
+          <button class="modal-close" id="btn-close-login" type="button">&times;</button>
+        </div>
+        <form id="form-login" class="login-form">
+          <div class="form-group">
+            <label for="login-username">USERNAME</label>
+            <input type="text" id="login-username" class="form-control" placeholder="admin or username" autocomplete="username" required />
+          </div>
+          <div class="form-group">
+            <label for="login-password">PASSWORD</label>
+            <input type="password" id="login-password" class="form-control" placeholder="••••••••" autocomplete="current-password" required />
+          </div>
+          <div class="form-error" id="login-error" style="display: none;"></div>
+          <div class="login-actions">
+            <button type="submit" class="btn btn-primary btn-block" id="btn-submit-credentials">
+              CONTINUE TO BIOMETRIC VERIFICATION →
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Stage 2: Face Verification -->
+      <div id="login-stage-face" style="display: none;">
+        <div class="modal-header login-header">
+          <div class="login-brand">
+            <div class="logo-mark sm">A</div>
+            <div>
+              <h3>BIOMETRIC FACE VERIFICATION</h3>
+              <p class="login-sub" id="face-user-hint">Authenticating user...</p>
+            </div>
+          </div>
+          <button class="modal-close" id="btn-close-face" type="button">&times;</button>
+        </div>
+        <div class="face-verify-body">
+          <!-- Live Camera Viewport -->
+          <div class="face-camera-container">
+            <img id="face-video-preview" src="/api/camera/video_feed" alt="Live Hardware Camera Feed" class="face-camera-img" />
+            <video id="face-video" autoplay playsinline muted style="display: none;"></video>
+            <canvas id="face-canvas" style="display: none;"></canvas>
+            <div class="face-scan-overlay">
+              <div class="scan-reticle">
+                <div class="reticle-corner tl"></div>
+                <div class="reticle-corner tr"></div>
+                <div class="reticle-corner bl"></div>
+                <div class="reticle-corner br"></div>
+                <div class="reticle-guide"></div>
+              </div>
+              <div class="scan-beam"></div>
+            </div>
+          </div>
+
+          <!-- Real-Time Subsystem Verification Status Pills -->
+          <div class="biometric-status-pills">
+            <div class="bio-pill" id="pill-camera-status">
+              <span class="status-dot dot-live"></span>
+              <span class="bio-pill-label">CAMERA:</span>
+              <strong class="bio-pill-val" id="val-cam-status">ACTIVE / 30 FPS</strong>
+            </div>
+            <div class="bio-pill" id="pill-frame-status">
+              <span class="status-dot dot-live"></span>
+              <span class="bio-pill-label">FRAME:</span>
+              <strong class="bio-pill-val" id="val-frame-status">VALID</strong>
+            </div>
+            <div class="bio-pill" id="pill-face-status">
+              <span class="status-dot dot-ai"></span>
+              <span class="bio-pill-label">FACE:</span>
+              <strong class="bio-pill-val" id="val-face-status">READY</strong>
+            </div>
+            <div class="bio-pill" id="pill-verify-status">
+              <span class="status-dot dot-ai"></span>
+              <span class="bio-pill-label">VERIFICATION:</span>
+              <strong class="bio-pill-val" id="val-verify-status">STANDBY</strong>
+            </div>
+          </div>
+
+          <div class="face-status-text" id="face-status-message">Position face directly within the reticle and capture...</div>
+          <div class="form-error" id="face-error" style="display: none;"></div>
+          
+          <div class="face-actions-row">
+            <button class="btn btn-outline" id="btn-back-to-credentials" type="button">← BACK</button>
+            <button class="btn btn-primary" id="btn-capture-face" type="button">CAPTURE & VERIFY FACE</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Investigation Snapshot (Step 6.3 & 6.4) -->
+  <div class="modal-backdrop" id="modal-investigation" style="display: none;">
+    <div class="modal-dialog modal-investigation-dialog">
+      <div class="modal-header inv-modal-header">
+        <div>
+          <span class="inv-modal-pretitle">INCIDENT INVESTIGATION SNAPSHOT</span>
+          <h3 id="inv-modal-title">INCIDENT: --</h3>
+        </div>
+        <button class="modal-close" id="btn-close-investigation" type="button">&times;</button>
+      </div>
+      <div class="modal-body inv-modal-body">
+        <div class="inv-grid">
+          <!-- Timeline & Events -->
+          <div class="inv-col-left">
+            <div class="inv-card">
+              <div class="inv-card-header">
+                <h4>PROVENANCE TIMELINE</h4>
+                <span class="badge" id="inv-timeline-count">0 EVENTS</span>
+              </div>
+              <div class="inv-timeline-scroll" id="inv-timeline-container">
+                <div class="inv-empty-note">Awaiting timeline...</div>
+              </div>
+            </div>
+            <div class="inv-card">
+              <div class="inv-card-header">
+                <h4>SUPPORTING OBSERVATIONS</h4>
+                <span class="badge" id="inv-events-count">0 OBSERVATIONS</span>
+              </div>
+              <div class="inv-events-scroll" id="inv-events-container">
+                <div class="inv-empty-note">No supporting events.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Analysis & Evidence Details -->
+          <div class="inv-col-right">
+            <div class="inv-card">
+              <div class="inv-card-header">
+                <h4>WHY INCIDENT WAS RAISED</h4>
+              </div>
+              <div class="inv-card-body">
+                <p id="inv-why-raised" class="field-content">--</p>
+                <div class="inv-grounding-section">
+                  <span class="field-label">GROUNDED EVENT IDS:</span>
+                  <div class="inv-grounding-tags" id="inv-llm-grounding-list">
+                    <span class="inv-empty-note">No event IDs referenced.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Camera Evidence Status Panel -->
+            <div class="inv-card" id="inv-camera-card">
+              <div class="inv-card-header">
+                <h4>CAMERA EVIDENCE ARTIFACT</h4>
+                <span class="badge badge-subtle" id="inv-camera-status-badge">NOT_RECORDED</span>
+              </div>
+              <div class="inv-card-body">
+                <p id="inv-camera-message" class="field-content text-dim">Camera evidence unavailable.</p>
+                <div id="inv-camera-artifact-container" style="display: none; margin-top: 10px;">
+                  <div class="inv-meta-grid" style="margin-bottom: 8px;">
+                    <div><span class="field-label">PROVENANCE:</span> <span class="badge badge-subtle" id="inv-cam-provenance">--</span></div>
+                    <div><span class="field-label">CAPTURED AT:</span> <strong id="inv-cam-captured">--</strong></div>
+                    <div><span class="field-label">SOURCE EVENT:</span> <strong id="inv-cam-source-event">--</strong></div>
+                    <div><span class="field-label">EVENT TIME:</span> <strong id="inv-cam-event-time">--</strong></div>
+                    <div><span class="field-label">FRAME TIME:</span> <strong id="inv-cam-frame-time">--</strong></div>
+                    <div><span class="field-label">EVIDENCE ID:</span> <strong id="inv-cam-evidence-id">--</strong></div>
+                    <div><span class="field-label">INTEGRITY:</span> <span class="badge badge-live" id="inv-cam-integrity">VERIFIED</span></div>
+                    <div><span class="field-label">DIMENSIONS:</span> <strong id="inv-cam-dimensions">--</strong></div>
+                    <div><span class="field-label">FILE SIZE:</span> <strong id="inv-cam-size">--</strong></div>
+                  </div>
+                  <div style="font-size: 11px; margin-bottom: 8px; word-break: break-all;">
+                    <span class="field-label">SHA-256:</span> <code id="inv-cam-sha256" style="color: #38bdf8;">--</code>
+                  </div>
+                  <div class="inv-evidence-frame-wrap">
+                    <img id="inv-evidence-img" src="" alt="Captured Evidence Frame" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Rules & Risk Box (Required by tests) -->
+            <div style="display: none;">
+              <span id="inv-rules-status-badge"></span>
+              <div id="inv-rules-container"></div>
+              <span id="inv-risk-score"></span>
+              <span id="inv-risk-level"></span>
+              <span id="inv-risk-human-req"></span>
+              <span id="inv-risk-reason"></span>
+              <span id="inv-orch-badge"></span>
+              <span id="inv-orch-decision"></span>
+              <span id="inv-orch-escalation"></span>
+              <span id="inv-orch-notif"></span>
+              <span id="inv-orch-reason"></span>
+              <span id="inv-notifs-count"></span>
+              <tbody id="inv-notifs-tbody"></tbody>
+              <span id="inv-audit-count"></span>
+              <tbody id="inv-audit-tbody"></tbody>
+            </div>
+
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer inv-modal-footer">
+        <div class="inv-footer-actions">
+          <button class="btn btn-xs btn-ack" id="inv-action-ack" type="button" style="display: none;">ACKNOWLEDGE</button>
+          <button class="btn btn-xs btn-resolve" id="inv-action-resolve" type="button" style="display: none;">RESOLVE</button>
+          <button class="btn btn-xs btn-dismiss" id="inv-action-dismiss" type="button" style="display: none;">DISMISS</button>
+          <button class="btn btn-xs btn-warning" id="inv-action-authorize" type="button" style="display: none;">AUTHORIZE</button>
+        </div>
+        <button class="btn btn-outline" id="btn-close-inv-footer" type="button">CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add User (Admin User Management) -->
+  <div class="modal-backdrop" id="modal-add-user" style="display: none;">
+    <div class="modal-dialog modal-user-dialog">
+      <div class="modal-header">
+        <h3 id="add-user-modal-title">ADD AUTHORIZED USER</h3>
+        <button class="modal-close" id="btn-close-add-user" type="button">&times;</button>
+      </div>
+      <form id="form-add-user" class="user-form">
+        <div class="form-group">
+          <label for="new-username">USERNAME</label>
+          <input type="text" id="new-username" class="form-control" placeholder="e.g. family_member" required />
+        </div>
+        <div class="form-group">
+          <label for="new-display-name">DISPLAY NAME</label>
+          <input type="text" id="new-display-name" class="form-control" placeholder="e.g. Sarah Jenkins" required />
+        </div>
+        <div class="form-group">
+          <label for="new-password">TEMPORARY PASSWORD</label>
+          <input type="password" id="new-password" class="form-control" placeholder="••••••••" required />
+        </div>
+        <div class="form-group">
+          <label for="new-role">ROLE</label>
+          <select id="new-role" class="form-control">
+            <option value="AUTHORIZED_USER" selected>AUTHORIZED USER (Family / Household)</option>
+            <option value="ADMIN">ADMINISTRATOR (Full Visibility & Control)</option>
+          </select>
+        </div>
+        <div class="form-error" id="add-user-error" style="display: none;"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-add-user">CANCEL</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-add-user">CREATE USER</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Edit User (Admin User Management) -->
+  <div class="modal-backdrop" id="modal-edit-user" style="display: none;">
+    <div class="modal-dialog modal-user-dialog">
+      <div class="modal-header">
+        <h3>EDIT USER DETAILS</h3>
+        <button class="modal-close" id="btn-close-edit-user" type="button">&times;</button>
+      </div>
+      <form id="form-edit-user" class="user-form">
+        <input type="hidden" id="edit-user-id" />
+        <div class="form-group">
+          <label>USERNAME</label>
+          <input type="text" id="edit-username" class="form-control" readonly disabled />
+        </div>
+        <div class="form-group">
+          <label for="edit-display-name">DISPLAY NAME</label>
+          <input type="text" id="edit-display-name" class="form-control" required />
+        </div>
+        <div class="form-group">
+          <label for="edit-role">ROLE</label>
+          <select id="edit-role" class="form-control">
+            <option value="AUTHORIZED_USER">AUTHORIZED USER</option>
+            <option value="ADMIN">ADMINISTRATOR</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="edit-password">RESET PASSWORD (OPTIONAL)</label>
+          <input type="password" id="edit-password" class="form-control" placeholder="Leave blank to keep current password" />
+        </div>
+        <div class="form-group checkbox-group">
+          <label>
+            <input type="checkbox" id="edit-is-active" /> ACCOUNT ACTIVE
+          </label>
+        </div>
+        <div class="form-error" id="edit-user-error" style="display: none;"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-edit-user">CANCEL</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-edit-user">SAVE CHANGES</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Authorized User Alert View -->
+  <div class="modal-backdrop" id="modal-auth-alert" style="display: none;">
+    <div class="modal-dialog modal-user-dialog">
+      <div class="modal-header">
+        <h3 id="auth-modal-alert-title">SECURITY ALERT DETAILS</h3>
+        <button class="modal-close" id="btn-close-auth-alert" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert-detail-badge-row">
+          <span class="badge badge-stale" id="auth-modal-alert-sev">HIGH SEVERITY</span>
+          <span class="badge" id="auth-modal-alert-status">ACTIVE</span>
+        </div>
+        <p class="alert-detail-summary" id="auth-modal-alert-summary">--</p>
+        <div class="inv-meta-grid" style="margin-top: 16px;">
+          <div><span class="field-label">DETECTED:</span> <strong id="auth-modal-alert-time">--</strong></div>
+          <div><span class="field-label">LOCATION:</span> <strong>Home Perimeter</strong></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-close-auth-alert-footer" type="button">CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Authorized User Alert-Gated Evidence -->
+  <div class="modal-backdrop" id="modal-auth-evidence" style="display: none;">
+    <div class="modal-dialog modal-user-dialog" style="max-width: 680px;">
+      <div class="modal-header">
+        <h3>ALERT EVIDENCE ARTIFACT</h3>
+        <button class="modal-close" id="btn-close-auth-evidence" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="auth-evidence-content">
+          <div class="inv-meta-grid" style="margin-bottom: 10px;">
+            <div><span class="field-label">EVIDENCE ID:</span> <strong id="auth-ev-id">--</strong></div>
+            <div><span class="field-label">INTEGRITY:</span> <span class="badge badge-live">VERIFIED SHA-256</span></div>
+          </div>
+          <div style="background: #000; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); text-align: center;">
+            <img id="auth-ev-img" src="" alt="Evidence Frame" style="max-width: 100%; max-height: 380px; display: block; margin: 0 auto; object-fit: contain;" />
+          </div>
+        </div>
+        <div id="auth-evidence-error" class="form-error" style="display: none; margin-top: 12px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-close-auth-ev-footer" type="button">CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Authorized User Alert-Gated Live Camera -->
+  <div class="modal-backdrop" id="modal-auth-live" style="display: none;">
+    <div class="modal-dialog modal-user-dialog" style="max-width: 720px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span class="pulse-dot"></span>
+          <h3>LIVE PERIMETER FEED (ALERT ACTIVE)</h3>
+        </div>
+        <button class="modal-close" id="btn-close-auth-live" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="background: #000; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); text-align: center;">
+          <img id="auth-live-img" src="" alt="Live Feed" style="max-width: 100%; max-height: 420px; display: block; margin: 0 auto; object-fit: contain;" />
+        </div>
+        <div id="auth-live-error" class="form-error" style="display: none; margin-top: 12px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-close-auth-live-footer" type="button">CLOSE STREAM</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden Action Modals for Resolve, Dismiss, Authorize (Admin) -->
+  <div class="modal-backdrop" id="modal-resolve" style="display: none;">
+    <div class="modal-dialog modal-action-dialog">
+      <div class="modal-header">
+        <h3>RESOLVE INCIDENT</h3>
+        <button class="modal-close" id="btn-close-resolve">&times;</button>
+      </div>
+      <form id="form-resolve">
+        <input type="hidden" id="resolve-incident-id" />
+        <div class="action-ctx-summary">
+          <div><span class="field-label">ID:</span> <strong id="resolve-ctx-id">--</strong></div>
+          <div><span class="field-label">TYPE:</span> <strong id="resolve-ctx-type">--</strong></div>
+          <div><span class="field-label">SEVERITY:</span> <strong id="resolve-ctx-sev">--</strong></div>
+          <div><span class="field-label">RISK:</span> <strong id="resolve-ctx-risk">--</strong></div>
+        </div>
+        <div class="form-group">
+          <label for="resolve-reason">RESOLUTION REASON *</label>
+          <select id="resolve-reason" class="form-control" required>
+            <option value="">Select mandatory reason...</option>
+            <option value="USER_CONFIRMED_SAFE">USER CONFIRMED SAFE</option>
+            <option value="KNOWN_PERSON_AUTHORIZED">KNOWN PERSON AUTHORIZED</option>
+            <option value="FALSE_ALARM_VERIFIED">FALSE ALARM VERIFIED</option>
+            <option value="SYSTEM_TEST">SYSTEM TEST</option>
+            <option value="OTHER">OTHER</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="resolve-notes">NOTES</label>
+          <textarea id="resolve-notes" class="form-control" rows="2" placeholder="Optional audit explanation..."></textarea>
+        </div>
+        <div class="form-error" id="resolve-error" style="display: none;"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-resolve">CANCEL</button>
+          <button type="submit" class="btn btn-resolve" id="btn-submit-resolve">CONFIRM RESOLVE</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-dismiss" style="display: none;">
+    <div class="modal-dialog modal-action-dialog">
+      <div class="modal-header">
+        <h3>DISMISS INCIDENT</h3>
+        <button class="modal-close" id="btn-close-dismiss">&times;</button>
+      </div>
+      <form id="form-dismiss">
+        <input type="hidden" id="dismiss-incident-id" />
+        <div class="action-ctx-summary">
+          <div><span class="field-label">ID:</span> <strong id="dismiss-ctx-id">--</strong></div>
+          <div><span class="field-label">TYPE:</span> <strong id="dismiss-ctx-type">--</strong></div>
+          <div><span class="field-label">SEVERITY:</span> <strong id="dismiss-ctx-sev">--</strong></div>
+        </div>
+        <div class="form-group">
+          <label for="dismiss-reason">MANDATORY DISMISSAL REASON *</label>
+          <textarea id="dismiss-reason" class="form-control" rows="3" placeholder="Explain why this incident is being dismissed..." required></textarea>
+        </div>
+        <div class="form-error" id="dismiss-error" style="display: none;"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-dismiss">CANCEL</button>
+          <button type="submit" class="btn btn-dismiss" id="btn-submit-dismiss">CONFIRM DISMISS</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-authorize" style="display: none;">
+    <div class="modal-dialog modal-action-dialog">
+      <div class="modal-header">
+        <h3>AUTHORIZE RESPONSE ESCALATION</h3>
+        <button class="modal-close" id="btn-close-authorize">&times;</button>
+      </div>
+      <form id="form-authorize">
+        <input type="hidden" id="authorize-incident-id" />
+        <div class="action-ctx-summary">
+          <div><span class="field-label">ID:</span> <strong id="auth-ctx-id">--</strong></div>
+          <div><span class="field-label">TYPE:</span> <strong id="auth-ctx-type">--</strong></div>
+          <div><span class="field-label">RISK:</span> <strong id="auth-ctx-risk">--</strong></div>
+          <div><span class="field-label">DECISION:</span> <strong id="auth-ctx-decision">AUTHORIZATION_REQUIRED</strong></div>
+        </div>
+        <div class="form-group">
+          <label for="authorize-reason">AUTHORIZATION JUSTIFICATION *</label>
+          <textarea id="authorize-reason" class="form-control" rows="3" placeholder="Reason for authorizing escalation..." required></textarea>
+        </div>
+        <div class="form-error" id="authorize-error" style="display: none;"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-authorize">CANCEL</button>
+          <button type="submit" class="btn btn-warning" id="btn-submit-authorize">AUTHORIZE RESPONSE</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
