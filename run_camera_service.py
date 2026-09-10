@@ -34,7 +34,17 @@ def main() -> int:
     print(f"Status Endpoint:   http://{settings.api_host}:{settings.api_port}/api/status")
     print(f"Camera Frame:      http://{settings.api_host}:{settings.api_port}/api/camera/frame")
     print(f"Diagnostics URL:   http://{settings.api_host}:{settings.api_port}/api/diagnostics")
+    if getattr(settings, "companion_enabled", True):
+        print(f"Companion Serial:  {settings.companion_port} @ {settings.companion_baud} baud")
     print("=" * 64)
+
+    # Initialize physical companion serial bridge
+    companion_bridge = None
+    if getattr(settings, "companion_enabled", True):
+        from atlas.companion.bridge import get_companion_bridge
+        logger.info("Initializing ATLAS Companion serial bridge on %s...", settings.companion_port)
+        companion_bridge = get_companion_bridge(port=settings.companion_port, baudrate=settings.companion_baud)
+        companion_bridge.start()
 
     # Initialize the camera background capture thread
     logger.info("Initializing camera capture thread...")
@@ -118,7 +128,9 @@ def main() -> int:
     finally:
         worker.stop()
         camera.stop()
-        logger.info("Camera service and pipeline worker shutdown complete.")
+        if companion_bridge:
+            companion_bridge.stop()
+        logger.info("Camera service, pipeline worker, and companion bridge shutdown complete.")
 
     return 0
 

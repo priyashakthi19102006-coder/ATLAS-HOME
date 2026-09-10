@@ -2923,5 +2923,105 @@ def chat_history():
     }), 200
 
 
+# ============================================================================
+# Physical ATLAS Home Companion (ESP32 USB Serial COM5) Endpoints
+# ============================================================================
+
+@api_bp.route("/admin/companion/status", methods=["GET"])
+def admin_companion_status():
+    """Get live physical connection status, state, metrics, and activity log."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    from atlas.companion.service import get_companion_service
+    svc = get_companion_service()
+    return jsonify({
+        "status": "ok",
+        "companion": svc.get_status(),
+    }), 200
+
+
+@api_bp.route("/admin/companion/chat", methods=["POST"])
+def admin_companion_chat():
+    """Send user message to ATLAS Core, update companion state, and forward to ESP32."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    data = request.get_json(silent=True) or {}
+    message = (data.get("message") or "").strip()
+    if not message:
+        return jsonify({"error": "Bad Request", "details": "message is required."}), 400
+
+    from atlas.companion.service import get_companion_service
+    svc = get_companion_service()
+    try:
+        result = svc.chat_and_react(message, actor)
+        return jsonify(result), 200
+    except Exception as exc:
+        return jsonify({"error": "Companion Error", "details": str(exc)}), 500
+
+
+@api_bp.route("/admin/companion/test", methods=["POST"])
+def admin_companion_test():
+    """Execute physical companion diagnostic self-test."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    from atlas.companion.service import get_companion_service
+    svc = get_companion_service()
+    result = svc.test_companion()
+    return jsonify(result), 200
+
+
+@api_bp.route("/admin/companion/state", methods=["POST"])
+def admin_companion_state():
+    """Manually update physical companion state and emotion."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    data = request.get_json(silent=True) or {}
+    state_name = (data.get("state") or "").strip()
+    if not state_name:
+        return jsonify({"error": "Bad Request", "details": "state is required."}), 400
+
+    from atlas.companion.service import get_companion_service
+    svc = get_companion_service()
+    try:
+        result = svc.set_state(state_name)
+        return jsonify(result), 200
+    except ValueError as val_err:
+        return jsonify({"error": "Bad Request", "details": str(val_err)}), 400
+    except Exception as exc:
+        return jsonify({"error": "Companion Error", "details": str(exc)}), 500
+
+
+@api_bp.route("/admin/companion/speak", methods=["POST"])
+def admin_companion_speak():
+    """Synthesize text to speech and stream 16kHz audio to ESP32 DAC."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "Bad Request", "details": "text is required."}), 400
+
+    from atlas.companion.service import get_companion_service
+    svc = get_companion_service()
+    try:
+        result = svc.speak_text(text)
+        return jsonify(result), 200
+    except ValueError as val_err:
+        return jsonify({"error": "Bad Request", "details": str(val_err)}), 400
+    except Exception as exc:
+        return jsonify({"error": "Voice Streaming Error", "details": str(exc)}), 500
+
+
+
 
 

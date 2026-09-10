@@ -3110,4 +3110,347 @@ body {
   font-weight: 700;
 }
 
+/* ========================================================================= */
+/* ATLAS COMPANION ADMIN NAVIGATION & PAGE STYLING                           */
+/* ========================================================================= */
+
+.admin-nav-bar {
+  display: flex;
+  margin: 14px 0 18px 0;
+  background: var(--card-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+
+.admin-nav-container {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+}
+
+.admin-nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.admin-nav-tab:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.admin-nav-tab.active {
+  color: #ffffff;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.16) 0%, rgba(37, 99, 235, 0.2) 100%);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.2);
+}
+
+.admin-nav-tab .tab-icon {
+  font-size: 15px;
+}
+
+.admin-nav-tab .tab-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+}
+
+.admin-nav-tab.active .tab-badge {
+  background: rgba(56, 189, 248, 0.25);
+  color: var(--accent-cyan);
+}
+
+/* Companion Dashboard Layout */
+.companion-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1.8fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 1100px) {
+  .companion-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Companion Hardware Hero Card */
+.companion-hero-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.companion-status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.companion-title-wrap h2 {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.companion-title-wrap .sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.companion-metrics-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.comp-metric-card {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+}
+
+.comp-metric-label {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+}
+
+.comp-metric-value {
+  font-size: 14px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent-cyan);
+  margin-top: 4px;
+}
+
+/* Companion Affective State Widget */
+.companion-state-card {
+  background: rgba(13, 20, 36, 0.95);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.companion-state-avatar {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 54px;
+  margin-bottom: 16px;
+  background: radial-gradient(circle at 35% 35%, rgba(56, 189, 248, 0.25), rgba(15, 23, 42, 0.8));
+  border: 2px solid var(--accent-cyan);
+  box-shadow: 0 0 30px rgba(56, 189, 248, 0.25);
+  transition: all 0.4s ease;
+  position: relative;
+}
+
+.companion-state-avatar::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1px dashed rgba(56, 189, 248, 0.4);
+  animation: spin 20s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* State Themes */
+.state-idle .companion-state-avatar {
+  border-color: #10b981;
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.3);
+}
+.state-listening .companion-state-avatar {
+  border-color: #38bdf8;
+  box-shadow: 0 0 35px rgba(56, 189, 248, 0.4);
+  animation: pulse-ring 2s infinite;
+}
+.state-thinking .companion-state-avatar {
+  border-color: #a855f7;
+  box-shadow: 0 0 35px rgba(168, 85, 247, 0.4);
+}
+.state-speaking .companion-state-avatar {
+  border-color: #34d399;
+  box-shadow: 0 0 40px rgba(52, 211, 153, 0.5);
+}
+.state-happy .companion-state-avatar {
+  border-color: #eab308;
+  box-shadow: 0 0 35px rgba(234, 179, 8, 0.4);
+}
+.state-sad .companion-state-avatar {
+  border-color: #64748b;
+  box-shadow: 0 0 25px rgba(100, 116, 139, 0.3);
+}
+.state-surprised .companion-state-avatar {
+  border-color: #f97316;
+  box-shadow: 0 0 40px rgba(249, 115, 22, 0.45);
+}
+.state-confused .companion-state-avatar {
+  border-color: #ec4899;
+  box-shadow: 0 0 35px rgba(236, 72, 153, 0.4);
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.companion-state-pill {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 14px;
+  border-radius: 20px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.companion-state-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 320px;
+  margin-bottom: 18px;
+}
+
+.manual-state-triggers {
+  width: 100%;
+  border-top: 1px solid var(--border-color);
+  padding-top: 14px;
+}
+
+.manual-state-label {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  display: block;
+}
+
+.state-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.btn-state-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-state-chip:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
+/* Companion Terminal / Trace Log */
+.companion-terminal {
+  background: rgba(2, 6, 18, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  height: 180px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.term-entry {
+  display: flex;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.term-ts {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.term-dir {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.term-dir.dir-out {
+  color: var(--accent-cyan);
+}
+
+.term-dir.dir-in {
+  color: #34d399;
+}
+
+.term-dir.dir-sys {
+  color: #fbbf24;
+}
+
+.term-type {
+  color: #94a3b8;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.term-payload {
+  color: #f1f5f9;
+  word-break: break-word;
+}
+
 

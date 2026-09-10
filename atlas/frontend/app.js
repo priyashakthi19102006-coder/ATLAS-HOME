@@ -39,8 +39,14 @@
 
   // View Containers
   const viewAdmin = document.getElementById("view-admin-dashboard");
+  const viewAdminCompanion = document.getElementById("view-admin-companion");
   const viewAuth = document.getElementById("view-auth-dashboard");
   const viewGuest = document.getElementById("view-guest-dashboard");
+  const elAdminNavBar = document.getElementById("admin-nav-bar");
+  const tabAdminDashboard = document.getElementById("tab-admin-dashboard");
+  const tabAdminCompanion = document.getElementById("tab-admin-companion");
+  const elNavCompanionBadge = document.getElementById("nav-companion-badge");
+  let currentAdminTab = "dashboard"; // "dashboard" | "companion"
 
   // Admin Section A (Overview)
   const elKpiPerimeterVal = document.getElementById("kpi-perimeter-val");
@@ -533,7 +539,9 @@
       if (elHeaderIndicators) elHeaderIndicators.style.display = "none";
       if (elUserLoggedIn) elUserLoggedIn.style.display = "none";
       if (elUserLoggedOut) elUserLoggedOut.style.display = "flex";
+      if (elAdminNavBar) elAdminNavBar.style.display = "none";
       if (viewAdmin) viewAdmin.style.display = "none";
+      if (viewAdminCompanion) viewAdminCompanion.style.display = "none";
       if (viewAuth) viewAuth.style.display = "none";
       if (viewGuest) viewGuest.style.display = "block";
       detachAdminLiveStream();
@@ -567,11 +575,15 @@
       if (btnEditProfile) btnEditProfile.style.display = "inline-block";
 
       if (elHeaderIndicators) elHeaderIndicators.style.display = "flex";
-      if (viewAdmin) viewAdmin.style.display = "block";
-      if (viewAuth) viewAuth.style.display = "none";
-      if (viewGuest) viewGuest.style.display = "none";
-      attachAdminLiveStream();
+      if (elAdminNavBar) elAdminNavBar.style.display = "flex";
+
+      if (currentAdminTab === "companion") {
+        showAdminCompanionTab();
+      } else {
+        showAdminDashboardTab();
+      }
       startStreamWatchdog();
+      fetchCompanionStatus();
     } else {
       // AUTHORIZED USER DASHBOARD
       const userName = (currentUser.display_name || currentUser.username || "Authorized User").trim();
@@ -588,7 +600,9 @@
       if (btnEditProfile) btnEditProfile.style.display = "none";
 
       if (elHeaderIndicators) elHeaderIndicators.style.display = "none";
+      if (elAdminNavBar) elAdminNavBar.style.display = "none";
       if (viewAdmin) viewAdmin.style.display = "none";
+      if (viewAdminCompanion) viewAdminCompanion.style.display = "none";
       if (viewAuth) viewAuth.style.display = "block";
       if (viewGuest) viewGuest.style.display = "none";
     }
@@ -658,6 +672,7 @@
     }
 
     renderAdminDashboard(data);
+    fetchCompanionStatus();
   }
 
   function renderAdminDashboard(data) {
@@ -2834,6 +2849,429 @@
 
   if (btnCloseAuthorize) btnCloseAuthorize.addEventListener("click", () => { modalAuthorize.style.display = "none"; });
   if (btnCancelAuthorize) btnCancelAuthorize.addEventListener("click", () => { modalAuthorize.style.display = "none"; });
+
+
+  // =========================================================================
+  // ATLAS COMPANION CLIENT (ESP32 USB Serial COM5 Integration)
+  // =========================================================================
+
+  let isFetchingCompanion = false;
+
+  function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  }
+
+  const COMPANION_STATE_META = {
+    Idle: { icon: "🤖", label: "IDLE", desc: "Companion is resting in standby, monitoring home safety events and waiting for speech.", badgeClass: "badge-live" },
+    Listening: { icon: "🎧", label: "LISTENING", desc: "Companion microphone is actively processing acoustic input and awaiting voice commands.", badgeClass: "badge-loading" },
+    Thinking: { icon: "🧠", label: "THINKING", desc: "ATLAS Core LLM and deterministic perception pipeline are analyzing residential context.", badgeClass: "badge-loading" },
+    Speaking: { icon: "🗣️", label: "SPEAKING", desc: "Forwarding grounded verbal synthesis over serial bus to physical speaker.", badgeClass: "badge-live" },
+    Happy: { icon: "😊", label: "HAPPY", desc: "Positive affective state. All perimeter bounds and home occupants are verified safe.", badgeClass: "badge-live" },
+    Sad: { icon: "😢", label: "SAD", desc: "Sympathetic affective expression.", badgeClass: "badge-subtle" },
+    Surprised: { icon: "😲", label: "SURPRISED", desc: "Alert posture. High-risk security event or unexpected occupant transition detected.", badgeClass: "badge-error" },
+    Confused: { icon: "🤔", label: "CONFUSED", desc: "Perception ambiguity or uncertainty threshold exceeded.", badgeClass: "badge-warning" },
+  };
+
+  function showAdminDashboardTab() {
+    currentAdminTab = "dashboard";
+    if (tabAdminDashboard) tabAdminDashboard.classList.add("active");
+    if (tabAdminCompanion) tabAdminCompanion.classList.remove("active");
+    if (viewAdmin) viewAdmin.style.display = "block";
+    if (viewAdminCompanion) viewAdminCompanion.style.display = "none";
+    attachAdminLiveStream();
+  }
+
+  function showAdminCompanionTab() {
+    currentAdminTab = "companion";
+    if (tabAdminDashboard) tabAdminDashboard.classList.remove("active");
+    if (tabAdminCompanion) tabAdminCompanion.classList.add("active");
+    if (viewAdmin) viewAdmin.style.display = "none";
+    if (viewAdminCompanion) viewAdminCompanion.style.display = "block";
+    fetchCompanionStatus();
+  }
+
+  if (tabAdminDashboard) {
+    tabAdminDashboard.addEventListener("click", () => {
+      showAdminDashboardTab();
+    });
+  }
+
+  if (tabAdminCompanion) {
+    tabAdminCompanion.addEventListener("click", () => {
+      showAdminCompanionTab();
+    });
+  }
+
+  function renderCompanionStatus(comp) {
+    if (!comp) return;
+
+    // 1. Navigation Badge
+    if (elNavCompanionBadge) {
+      if (comp.connected) {
+        elNavCompanionBadge.textContent = "CONNECTED (COM5)";
+        elNavCompanionBadge.className = "tab-badge companion-conn-badge badge-live";
+      } else {
+        elNavCompanionBadge.textContent = "OFFLINE (COM5)";
+        elNavCompanionBadge.className = "tab-badge companion-conn-badge badge-subtle";
+      }
+    }
+
+    // 2. Hardware Hero Connection Pill
+    const pill = document.getElementById("companion-conn-pill");
+    const pillText = document.getElementById("companion-conn-text");
+    if (pill && pillText) {
+      if (comp.connected) {
+        pill.className = "badge badge-live";
+        pillText.textContent = "ONLINE (COM5)";
+      } else {
+        pill.className = "badge badge-error";
+        pillText.textContent = "OFFLINE / DISCONNECTED";
+      }
+    }
+
+    // 3. Telemetry Strips
+    const elPort = document.getElementById("comp-metric-port");
+    const elBaud = document.getElementById("comp-metric-baud");
+    const elTx = document.getElementById("comp-metric-tx");
+    const elRx = document.getElementById("comp-metric-rx");
+    if (elPort) elPort.textContent = comp.port || "COM5";
+    if (elBaud) elBaud.textContent = Number(comp.baudrate || 921600).toLocaleString();
+    if (elTx) elTx.textContent = formatBytes(comp.bytes_sent);
+    if (elRx) elRx.textContent = formatBytes(comp.bytes_received);
+
+    const elPkts = document.getElementById("companion-packet-stats");
+    if (elPkts) {
+      const total = (comp.packets_sent || 0) + (comp.packets_received || 0);
+      elPkts.textContent = `${total} PKTS (${comp.packets_sent || 0} TX / ${comp.packets_received || 0} RX)`;
+    }
+
+    const elVoice = document.getElementById("comp-metric-voice");
+    if (elVoice) elVoice.textContent = formatBytes(comp.audio_bytes_sent);
+
+    const elLastSeen = document.getElementById("companion-last-seen");
+    if (elLastSeen) {
+      elLastSeen.textContent = comp.last_seen_iso
+        ? `Last sync: ${formatLocalTime(comp.last_seen_iso)}`
+        : "Last sync: Awaiting link";
+    }
+
+    // 4. Affective State Card & Avatar
+    const stateName = comp.state || "Idle";
+    const stateMeta = COMPANION_STATE_META[stateName] || COMPANION_STATE_META.Idle;
+    const stateCard = document.getElementById("companion-state-container");
+    const avatarIcon = document.getElementById("companion-avatar-icon");
+    const stateLabel = document.getElementById("companion-state-label");
+    const stateDesc = document.getElementById("companion-state-description");
+
+    if (comp.is_speaking) {
+      if (stateCard) stateCard.className = "companion-state-card state-speaking";
+      if (avatarIcon) avatarIcon.textContent = "🗣️";
+      if (stateLabel) {
+        stateLabel.textContent = "SPEAKING (GPIO25 DAC)";
+        stateLabel.className = "companion-state-pill badge badge-live";
+      }
+      if (stateDesc) stateDesc.textContent = "Physical robot is actively playing 16kHz audio over GPIO25 DAC.";
+    } else {
+      if (stateCard) {
+        stateCard.className = `companion-state-card state-${stateName.toLowerCase()}`;
+      }
+      if (avatarIcon) avatarIcon.textContent = stateMeta.icon;
+      if (stateLabel) {
+        stateLabel.textContent = stateMeta.label;
+        stateLabel.className = `companion-state-pill badge ${stateMeta.badgeClass}`;
+      }
+      if (stateDesc) stateDesc.textContent = stateMeta.desc;
+    }
+
+    // Active Task Banner
+    const taskWrap = document.getElementById("companion-active-task-wrap");
+    const taskText = document.getElementById("companion-active-task-text");
+    if (taskWrap && taskText) {
+      if (comp.active_task) {
+        taskWrap.style.display = "block";
+        taskText.textContent = comp.active_task;
+      } else {
+        taskWrap.style.display = "none";
+      }
+    }
+
+    // 5. Hardware Serial Trace Terminal
+    const term = document.getElementById("companion-terminal-log");
+    if (term && Array.isArray(comp.recent_activities) && comp.recent_activities.length > 0) {
+      term.innerHTML = comp.recent_activities.map((act) => {
+        const dirClass = `dir-${(act.direction || "sys").toLowerCase()}`;
+        return `
+          <div class="term-entry">
+            <span class="term-ts">${formatLocalTime(act.timestamp)}</span>
+            <span class="term-dir ${dirClass}">[${escapeHtml(act.direction)}]</span>
+            <span class="term-type">${escapeHtml(act.event_type)}</span>
+            <span class="term-payload">${escapeHtml(act.payload)}</span>
+          </div>
+        `;
+      }).join("");
+      term.scrollTop = term.scrollHeight;
+    }
+  }
+
+  async function fetchCompanionStatus() {
+    if (!currentUser || currentUser.role !== "ADMIN") return;
+    if (isFetchingCompanion) return;
+    isFetchingCompanion = true;
+
+    try {
+      const resp = await fetch("/api/admin/companion/status", {
+        headers: { "Accept": "application/json" },
+        credentials: "same-origin",
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        renderCompanionStatus(data.companion);
+      }
+    } catch (err) {
+      console.warn("Companion status sync error:", err);
+    } finally {
+      isFetchingCompanion = false;
+    }
+  }
+
+  // Diagnostics Refresh button
+  const btnCompRefresh = document.getElementById("btn-companion-refresh");
+  if (btnCompRefresh) {
+    btnCompRefresh.addEventListener("click", () => {
+      fetchCompanionStatus();
+    });
+  }
+
+  // Diagnostics Test Companion button
+  const btnTestComp = document.getElementById("btn-test-companion");
+  if (btnTestComp) {
+    btnTestComp.addEventListener("click", async () => {
+      btnTestComp.disabled = true;
+      const origContent = btnTestComp.innerHTML;
+      btnTestComp.innerHTML = `<span>⏳</span> RUNNING TEST...`;
+
+      try {
+        const resp = await fetch("/api/admin/companion/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          fetchCompanionStatus();
+        } else {
+          alert(`Diagnostic test error: ${data.details || data.error}`);
+        }
+      } catch (err) {
+        alert(`Failed to trigger diagnostic test: ${err.message}`);
+      } finally {
+        btnTestComp.disabled = false;
+        btnTestComp.innerHTML = origContent;
+      }
+    });
+  }
+
+  // Direct Voice Synthesis & Streaming Test button
+  const btnDirectSpeak = document.getElementById("btn-companion-direct-speak");
+  const inputDirectSpeak = document.getElementById("companion-speak-input");
+  if (btnDirectSpeak && inputDirectSpeak) {
+    btnDirectSpeak.addEventListener("click", async () => {
+      const text = inputDirectSpeak.value.trim();
+      if (!text) {
+        inputDirectSpeak.focus();
+        return;
+      }
+      btnDirectSpeak.disabled = true;
+      const origText = btnDirectSpeak.innerHTML;
+      btnDirectSpeak.innerHTML = `<span>⏳</span> STREAMING AUDIO...`;
+
+      try {
+        const resp = await fetch("/api/admin/companion/speak", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+          credentials: "same-origin",
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          fetchCompanionStatus();
+        } else {
+          alert(`Direct voice error: ${data.details || data.error}`);
+        }
+      } catch (err) {
+        alert(`Failed to stream voice audio: ${err.message}`);
+      } finally {
+        btnDirectSpeak.disabled = false;
+        btnDirectSpeak.innerHTML = origText;
+      }
+    });
+
+    inputDirectSpeak.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        btnDirectSpeak.click();
+      }
+    });
+  }
+
+  // Manual Affective State buttons
+  document.querySelectorAll("button[data-companion-state]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const targetState = btn.dataset.companionState;
+      if (!targetState) return;
+
+      try {
+        const resp = await fetch("/api/admin/companion/state", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state: targetState }),
+          credentials: "same-origin",
+        });
+        if (resp.ok) {
+          fetchCompanionStatus();
+        }
+      } catch (err) {
+        console.error("Failed to set companion state:", err);
+      }
+    });
+  });
+
+  // Companion Chat Prompt Chips
+  document.querySelectorAll("button[data-companion-prompt]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const prompt = btn.dataset.companionPrompt;
+      const input = document.getElementById("companion-chat-input");
+      const form = document.getElementById("companion-chat-form");
+      if (input && form && prompt) {
+        input.value = prompt;
+        form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+      }
+    });
+  });
+
+  // Companion Chat Form Submit
+  const companionChatForm = document.getElementById("companion-chat-form");
+  const companionChatInput = document.getElementById("companion-chat-input");
+  const companionChatMessages = document.getElementById("companion-chat-messages");
+  const btnCompanionChatSend = document.getElementById("btn-companion-chat-send");
+
+  if (companionChatForm && companionChatInput && companionChatMessages) {
+    companionChatForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const message = companionChatInput.value.trim();
+      if (!message) return;
+
+      // 1. Append User Message
+      const userMsgHtml = `
+        <div class="chat-message chat-message-user">
+          <div class="chat-msg-header">
+            <span class="chat-sender">${escapeHtml(currentUser?.display_name || "ADMINISTRATOR")}</span>
+            <span class="chat-msg-time">${new Date().toLocaleTimeString()}</span>
+          </div>
+          <div class="chat-msg-body">${escapeHtml(message)}</div>
+        </div>
+      `;
+      companionChatMessages.insertAdjacentHTML("beforeend", userMsgHtml);
+      companionChatInput.value = "";
+
+      // 2. Append Assistant Thinking Placeholder
+      const placeholderId = `comp-msg-${Date.now()}`;
+      const placeholderHtml = `
+        <div class="chat-message chat-message-assistant" id="${placeholderId}">
+          <div class="chat-msg-header">
+            <span class="chat-sender">ATLAS COMPANION</span>
+            <span class="badge badge-loading" style="font-size: 9px;">THINKING &amp; COMMUNICATING...</span>
+          </div>
+          <div class="chat-msg-body" style="color: var(--text-dim); font-style: italic;">
+            Analyzing residential context and dispatching reaction to physical robot...
+          </div>
+        </div>
+      `;
+      companionChatMessages.insertAdjacentHTML("beforeend", placeholderHtml);
+      companionChatMessages.scrollTop = companionChatMessages.scrollHeight;
+
+      if (btnCompanionChatSend) btnCompanionChatSend.disabled = true;
+
+      try {
+        const resp = await fetch("/api/admin/companion/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message }),
+          credentials: "same-origin",
+        });
+
+        const data = await resp.json();
+        const placeholder = document.getElementById(placeholderId);
+
+        if (resp.ok) {
+          const reactionBadge = data.companion_reaction
+            ? `<span class="badge badge-live" style="font-size: 9px; margin-left: 6px;">EXPRESSION: ${escapeHtml(data.companion_reaction.toUpperCase())}</span>`
+            : "";
+          const hardwareBadge = data.dispatched_to_hardware
+            ? `<span class="badge badge-live" style="font-size: 9px; margin-left: 6px;">DISPATCHED TO COM5</span>`
+            : `<span class="badge badge-subtle" style="font-size: 9px; margin-left: 6px;">OFFLINE BUS</span>`;
+          const audioBadge = data.audio_duration_seconds
+            ? `<span class="badge badge-live" style="font-size: 9px; margin-left: 6px;">VOICE: ${data.audio_duration_seconds}s (${formatBytes(data.audio_pcm_bytes)})</span>`
+            : "";
+
+          const citationsHtml = Array.isArray(data.citations) && data.citations.length > 0
+            ? `<div style="margin-top: 8px; font-size: 11px; color: var(--accent-cyan); font-family: var(--font-mono);">
+                <strong>GROUNDING:</strong> ${data.citations.map(c => `[${escapeHtml(c)}]`).join(" ")}
+               </div>`
+            : "";
+
+          if (placeholder) {
+            placeholder.innerHTML = `
+              <div class="chat-msg-header">
+                <span class="chat-sender">ATLAS COMPANION</span>
+                ${reactionBadge}
+                ${hardwareBadge}
+                ${audioBadge}
+                <span class="chat-msg-time">${new Date().toLocaleTimeString()}</span>
+              </div>
+              <div class="chat-msg-body">
+                ${escapeHtml(data.answer)}
+                ${citationsHtml}
+              </div>
+            `;
+          }
+        } else {
+          if (placeholder) {
+            placeholder.innerHTML = `
+              <div class="chat-msg-header">
+                <span class="chat-sender">ATLAS COMPANION</span>
+                <span class="badge badge-error" style="font-size: 9px;">ERROR</span>
+              </div>
+              <div class="chat-msg-body" style="color: #f87171;">
+                ${escapeHtml(data.details || data.error || "Failed to process request.")}
+              </div>
+            `;
+          }
+        }
+      } catch (err) {
+        const placeholder = document.getElementById(placeholderId);
+        if (placeholder) {
+          placeholder.innerHTML = `
+            <div class="chat-msg-header">
+              <span class="chat-sender">ATLAS COMPANION</span>
+              <span class="badge badge-error" style="font-size: 9px;">NETWORK ERROR</span>
+            </div>
+            <div class="chat-msg-body" style="color: #f87171;">
+              ${escapeHtml(err.message)}
+            </div>
+          `;
+        }
+      } finally {
+        if (btnCompanionChatSend) btnCompanionChatSend.disabled = false;
+        companionChatMessages.scrollTop = companionChatMessages.scrollHeight;
+        fetchCompanionStatus();
+      }
+    });
+  }
 
 
   // =========================================================================

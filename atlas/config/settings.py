@@ -96,6 +96,11 @@ class Settings:
         self.mobile_push_api_key: str = os.getenv("ATLAS_MOBILE_PUSH_API_KEY", "").strip()
         self.email_notifications_enabled: bool = os.getenv("ATLAS_EMAIL_NOTIFICATIONS_ENABLED", "false").strip().lower() in ("true", "1", "yes")
 
+        # Physical ATLAS Home Companion (ESP32 via USB Serial)
+        self.companion_port: str = os.getenv("ATLAS_COMPANION_PORT", "COM5").strip()
+        self.companion_baud: int = int(os.getenv("ATLAS_COMPANION_BAUD", "921600"))
+        self.companion_enabled: bool = os.getenv("ATLAS_COMPANION_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+
     def to_dict(self, hide_sensitive: bool = False) -> dict[str, Any]:
         api_key_repr = None
         if self.llm_provider == "ollama":
@@ -126,6 +131,9 @@ class Settings:
             "notification_retry_count": self.notification_retry_count,
             "mobile_push_enabled": self.mobile_push_enabled,
             "email_notifications_enabled": self.email_notifications_enabled,
+            "companion_port": self.companion_port,
+            "companion_baud": self.companion_baud,
+            "companion_enabled": self.companion_enabled,
         }
 
 

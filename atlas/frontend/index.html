@@ -75,6 +75,22 @@
       </div>
     </div>
 
+    <!-- Admin Navigation Bar (Exclusively for Authenticated Admin) -->
+    <nav class="admin-nav-bar" id="admin-nav-bar" style="display: none;">
+      <div class="admin-nav-container">
+        <button type="button" class="admin-nav-tab active" id="tab-admin-dashboard">
+          <span class="tab-icon">🛡️</span>
+          <span class="tab-title">SAFETY DASHBOARD</span>
+          <span class="tab-badge">SECTIONS A-J</span>
+        </button>
+        <button type="button" class="admin-nav-tab" id="tab-admin-companion">
+          <span class="tab-icon">🤖</span>
+          <span class="tab-title">ATLAS COMPANION</span>
+          <span class="tab-badge companion-conn-badge" id="nav-companion-badge">PROBING...</span>
+        </button>
+      </div>
+    </nav>
+
     <!-- ===================================================================== -->
     <!-- VIEW 1: ADMIN DASHBOARD (Sections A through J)                         -->
     <!-- ===================================================================== -->
@@ -438,6 +454,180 @@
 
     </div><!-- End Admin Dashboard -->
 
+    <!-- ===================================================================== -->
+    <!-- VIEW 1B: ATLAS COMPANION (Dedicated Admin Physical Robotics Page)     -->
+    <!-- ===================================================================== -->
+    <div id="view-admin-companion" class="dashboard-view" style="display: none;">
+      
+      <!-- Top Row: Connection Status & State Overview -->
+      <div class="companion-grid">
+        
+        <!-- Column 1: Hardware Hero & Telemetry -->
+        <div class="companion-hero-card">
+          <div class="companion-status-header">
+            <div class="companion-title-wrap">
+              <h2><span>🤖</span> PHYSICAL ROBOT STATUS</h2>
+              <div class="sub">USB Serial Link: ESP32 Companion on COM5 @ 921600 Baud</div>
+            </div>
+            <div id="companion-conn-pill" class="badge badge-loading">
+              <span class="pulse-dot"></span>
+              <span id="companion-conn-text">PROBING HARDWARE</span>
+            </div>
+          </div>
+
+          <!-- Hardware Telemetry Matrix -->
+          <div class="companion-metrics-strip">
+            <div class="comp-metric-card">
+              <div class="comp-metric-label">PORT</div>
+              <div class="comp-metric-value" id="comp-metric-port">COM5</div>
+            </div>
+            <div class="comp-metric-card">
+              <div class="comp-metric-label">BAUD</div>
+              <div class="comp-metric-value" id="comp-metric-baud">921,600</div>
+            </div>
+            <div class="comp-metric-card">
+              <div class="comp-metric-label">DATA TX</div>
+              <div class="comp-metric-value" id="comp-metric-tx">0 B</div>
+            </div>
+            <div class="comp-metric-card">
+              <div class="comp-metric-label">DATA RX</div>
+              <div class="comp-metric-value" id="comp-metric-rx">0 B</div>
+            </div>
+            <div class="comp-metric-card">
+              <div class="comp-metric-label">VOICE AUDIO</div>
+              <div class="comp-metric-value" id="comp-metric-voice">0 B</div>
+            </div>
+          </div>
+
+          <!-- Hardware Diagnostics Controls -->
+          <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 12px; background: rgba(0, 0, 0, 0.25); border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+            <div>
+              <div style="font-size: 11px; font-weight: 700; color: #fff;">HARDWARE CONTROLS</div>
+              <div style="font-size: 10px; color: var(--text-dim);" id="companion-last-seen">Last sync: Awaiting link</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-companion-refresh">
+                <span>🔄</span> REFRESH
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-test-companion">
+                <span>⚡</span> TEST COMPANION
+              </button>
+            </div>
+          </div>
+
+          <!-- Direct Voice Synthesis Control -->
+          <div style="display: flex; gap: 8px; align-items: center; padding: 10px 12px; background: rgba(0, 0, 0, 0.2); border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+            <input type="text" id="companion-speak-input" class="form-control" placeholder="Test 16kHz voice playback on ESP32 DAC (e.g. 'Perimeter secure')..." style="font-size: 11px; padding: 6px 10px;" />
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-companion-direct-speak" style="flex-shrink: 0;">
+              <span>🔊</span> SPEAK TEST
+            </button>
+          </div>
+
+          <!-- Robot Activity & Hardware Trace Terminal -->
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span style="font-size: 10px; font-family: var(--font-mono); color: var(--text-dim); letter-spacing: 0.05em;">PHYSICAL SERIAL BUS TRACE (COM5)</span>
+              <span class="badge badge-subtle" style="font-size: 9px;" id="companion-packet-stats">0 PKTS</span>
+            </div>
+            <div class="companion-terminal" id="companion-terminal-log">
+              <div class="term-entry">
+                <span class="term-ts">--:--:--</span>
+                <span class="term-dir dir-sys">[SYS]</span>
+                <span class="term-type">INIT</span>
+                <span class="term-payload">Initializing ATLAS companion physical link monitor...</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Column 2: Companion Affective State & Emotion Controller -->
+        <div class="companion-state-card" id="companion-state-container">
+          <div class="companion-state-avatar" id="companion-state-avatar">
+            <span id="companion-avatar-icon">🤖</span>
+          </div>
+
+          <div class="companion-state-pill badge badge-live" id="companion-state-label">
+            IDLE
+          </div>
+
+          <div class="companion-state-desc" id="companion-state-description">
+            Companion is resting in standby, monitoring home safety events and waiting for speech.
+          </div>
+
+          <!-- Active Task Banner -->
+          <div id="companion-active-task-wrap" style="display: none; margin-bottom: 14px; width: 100%;">
+            <div class="badge badge-loading" style="width: 100%; padding: 6px; font-size: 10px; text-transform: uppercase;" id="companion-active-task-text">
+              PROCESSING
+            </div>
+          </div>
+
+          <!-- Manual Affective Expression Triggers -->
+          <div class="manual-state-triggers">
+            <span class="manual-state-label">MANUAL AFFECTIVE / POSTURE CONTROLS:</span>
+            <div class="state-chip-row">
+              <button type="button" class="btn-state-chip" data-companion-state="Idle">🟢 Idle</button>
+              <button type="button" class="btn-state-chip" data-companion-state="Listening">🎧 Listening</button>
+              <button type="button" class="btn-state-chip" data-companion-state="Thinking">🧠 Thinking</button>
+              <button type="button" class="btn-state-chip" data-companion-state="Speaking">🗣️ Speaking</button>
+              <button type="button" class="btn-state-chip" data-companion-state="Happy">😊 Happy</button>
+              <button type="button" class="btn-state-chip" data-companion-state="Sad">😢 Sad</button>
+              <button type="button" class="btn-state-chip" data-companion-state="Surprised">😲 Surprised</button>
+              <button type="button" class="btn-state-chip" data-companion-state="Confused">🤔 Confused</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Bottom Row: Live Grounded Conversation Panel with Forwarding to Physical Robot -->
+      <section class="card section-chat" style="margin-bottom: 24px;">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span style="font-size: 1.2rem;">💬</span>
+            <div>
+              <h2>LIVE COMPANION CONVERSATION &amp; SERIAL FORWARDING</h2>
+              <span class="subtitle-text">Queries are grounded in real ATLAS safety context and speech is forwarded directly to physical robot on COM5</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <span class="badge badge-live" id="comp-chat-engine-badge">CORE: GROUNDED ASSISTANT</span>
+            <span class="badge badge-subtle" id="comp-chat-forward-badge">USB SERIAL: COM5</span>
+          </div>
+        </div>
+
+        <div class="card-body chat-card-body">
+          <div class="chat-quick-queries">
+            <span class="quick-label">PROMPTS FOR ATLAS COMPANION:</span>
+            <button type="button" class="btn btn-xs btn-chip" data-companion-prompt="Who is currently inside?">Who is currently inside?</button>
+            <button type="button" class="btn btn-xs btn-chip" data-companion-prompt="What do you see right now?">What do you see right now?</button>
+            <button type="button" class="btn btn-xs btn-chip" data-companion-prompt="Is the perimeter secure?">Is perimeter secure?</button>
+            <button type="button" class="btn btn-xs btn-chip" data-companion-prompt="What happened today?">What happened today?</button>
+            <button type="button" class="btn btn-xs btn-chip" data-companion-prompt="Say hello to Priya!">Say hello to Priya!</button>
+          </div>
+
+          <div class="chat-messages-container" id="companion-chat-messages" style="min-height: 280px;">
+            <div class="chat-message chat-message-assistant">
+              <div class="chat-msg-header">
+                <span class="chat-sender">ATLAS COMPANION</span>
+                <span class="badge badge-live" style="font-size: 9px;">READY ON COM5</span>
+              </div>
+              <div class="chat-msg-body">
+                Hello Administrator! The physical ATLAS Home Companion is synchronized via USB serial COM5 at 921,600 baud. Ask me any question about the house, observed people, or perimeter safety, and I will speak and react in real-time.
+              </div>
+            </div>
+          </div>
+
+          <form class="chat-input-row" id="companion-chat-form">
+            <input type="text" id="companion-chat-input" class="form-control chat-input" placeholder="Type a message or safety inquiry to speak through the physical ATLAS robot..." autocomplete="off" />
+            <button type="submit" class="btn btn-primary" id="btn-companion-chat-send">
+              <span>🗣️</span> TALK TO ATLAS
+            </button>
+          </form>
+        </div>
+      </section>
+
+    </div><!-- End ATLAS Companion View -->
 
     <!-- ===================================================================== -->
     <!-- VIEW 2: AUTHORIZED USER DASHBOARD                                     -->
