@@ -65,16 +65,28 @@
   const elLlmVerifyReq = document.getElementById("llm-verify-req");
   const elLlmModel = document.getElementById("llm-model");
 
-  // Admin Section B (Live)
+  // Admin Section B (Live Camera)
   const elCameraFeed = document.getElementById("camera-feed");
   const elCameraSourceLabel = document.getElementById("camera-source-label");
+  const elLiveCamStatusPill = document.getElementById("live-cam-status-pill");
+  const elLiveCamStatusText = document.getElementById("live-cam-status-text");
+  const btnCameraToggle = document.getElementById("btn-camera-toggle");
   const elVideoOverlay = document.getElementById("video-overlay");
   const elOverlayTitle = document.getElementById("overlay-title");
   const elOverlayMsg = document.getElementById("overlay-msg");
+  const elOverlayIcon = document.getElementById("overlay-icon");
+  const btnRetryStream = document.getElementById("btn-retry-stream");
   const elMetricFps = document.getElementById("metric-fps");
   const elMetricResolution = document.getElementById("metric-resolution");
   const elMetricPeopleCount = document.getElementById("metric-people-count");
   const elMetricObjectsCount = document.getElementById("metric-objects-count");
+  const elMetricLastFrame = document.getElementById("metric-last-frame");
+
+  // Camera Confirmation Modal
+  const modalCameraConfirm = document.getElementById("modal-camera-confirm");
+  const btnCloseCameraConfirm = document.getElementById("btn-close-camera-confirm");
+  const btnCancelCameraOff = document.getElementById("btn-cancel-camera-off");
+  const btnConfirmCameraOff = document.getElementById("btn-confirm-camera-off");
 
   // Admin Section C (People)
   const elAdminPeopleCount = document.getElementById("admin-people-count");
@@ -214,10 +226,31 @@
   const inputEditUserId = document.getElementById("edit-user-id");
   const inputEditUsername = document.getElementById("edit-username");
   const inputEditDisplayName = document.getElementById("edit-display-name");
+  const selectEditRelationship = document.getElementById("edit-relationship");
+  const inputEditPhone = document.getElementById("edit-phone");
   const selectEditRole = document.getElementById("edit-role");
   const checkEditIsActive = document.getElementById("edit-is-active");
   const inputEditPassword = document.getElementById("edit-password");
   const elEditUserError = document.getElementById("edit-user-error");
+
+  const modalRemoveUser = document.getElementById("modal-remove-user");
+  const btnCloseRemoveUser = document.getElementById("btn-close-remove-user");
+  const btnCancelRemoveUser = document.getElementById("btn-cancel-remove-user");
+  const btnConfirmRemoveUser = document.getElementById("btn-confirm-remove-user");
+  const inputRemoveUserId = document.getElementById("remove-user-id");
+  const elRemoveUserName = document.getElementById("remove-user-name");
+  const elRemoveUserHandle = document.getElementById("remove-user-handle");
+  const elRemoveUserError = document.getElementById("remove-user-error");
+
+  const modalManageFace = document.getElementById("modal-manage-face");
+  const btnCloseManageFace = document.getElementById("btn-close-manage-face");
+  const inputFaceMgmtUserId = document.getElementById("face-mgmt-user-id");
+  const elFaceMgmtUserName = document.getElementById("face-mgmt-user-name");
+  const elFaceMgmtUserHandle = document.getElementById("face-mgmt-user-handle");
+  const elFaceMgmtStatusBadge = document.getElementById("face-mgmt-status-badge");
+  const elFaceMgmtError = document.getElementById("face-mgmt-error");
+  const btnActionRemoveFace = document.getElementById("btn-action-remove-face");
+  const btnActionReplaceFace = document.getElementById("btn-action-replace-face");
 
   // Authorized User Alert Modals
   const modalAuthAlert = document.getElementById("modal-auth-alert");
@@ -291,6 +324,44 @@
       .replace(/'/g, "&#039;");
   }
 
+  // Helper: Format ISO string to browser's local timezone date & time
+  function formatLocalDateTime(isoStr) {
+    if (!isoStr) return "--";
+    try {
+      const d = new Date(isoStr);
+      if (isNaN(d.getTime())) return String(isoStr).replace("T", " ").split(".")[0];
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }) + " " + d.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+      });
+    } catch (e) {
+      return String(isoStr).replace("T", " ").split(".")[0];
+    }
+  }
+
+  // Helper: Format ISO string to browser's local time (HH:MM:SS AM/PM)
+  function formatLocalTime(isoStr) {
+    if (!isoStr) return "--";
+    try {
+      const d = new Date(isoStr);
+      if (isNaN(d.getTime())) return String(isoStr).split("T")[1]?.split(".")[0] || "--";
+      return d.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+      });
+    } catch (e) {
+      return String(isoStr).split("T")[1]?.split(".")[0] || "--";
+    }
+  }
+
   // Update Connection Status Badge
   function setConnectionState(state, customMessage) {
     connectionState = state;
@@ -299,21 +370,6 @@
     }
     if (elConnectionText) {
       elConnectionText.textContent = customMessage || state;
-    }
-    if (state === "LIVE") {
-      if (elVideoOverlay) elVideoOverlay.style.display = "none";
-    } else if (state === "STALE") {
-      if (elVideoOverlay) {
-        elVideoOverlay.style.display = "flex";
-        elOverlayTitle.textContent = "SIGNAL STALE";
-        elOverlayMsg.textContent = "Backend updates delayed > 5s.";
-      }
-    } else if (state === "DISCONNECTED") {
-      if (elVideoOverlay) {
-        elVideoOverlay.style.display = "flex";
-        elOverlayTitle.textContent = "DISCONNECTED";
-        elOverlayMsg.textContent = "Cannot connect to ATLAS backend. Retrying every 1s...";
-      }
     }
   }
 
@@ -324,6 +380,146 @@
     if (deltaMs > STALE_THRESHOLD_MS && connectionState === "LIVE") {
       setConnectionState("STALE");
     }
+  }
+
+  // Live Camera Stream State (Section B)
+  let cameraEnabled = true;
+  let streamConnected = false;
+  let lastFrameReceivedAt = 0;
+  let streamReconnectTimer = null;
+  let streamWatchdogTimer = null;
+
+  function setLiveCameraUI(state, customMsg) {
+    if (!elLiveCamStatusPill || !elLiveCamStatusText) return;
+
+    if (state === "LIVE") {
+      elLiveCamStatusPill.className = "status-pill status-live";
+      elLiveCamStatusText.textContent = "CAMERA LIVE";
+      if (btnCameraToggle) {
+        btnCameraToggle.textContent = "TURN CAMERA OFF";
+        btnCameraToggle.className = "btn btn-sm btn-turn-off";
+        btnCameraToggle.disabled = false;
+      }
+      if (elVideoOverlay) elVideoOverlay.className = "video-overlay hidden";
+      if (btnRetryStream) btnRetryStream.style.display = "none";
+    } else if (state === "OFF") {
+      elLiveCamStatusPill.className = "status-pill status-off";
+      elLiveCamStatusText.textContent = "CAMERA OFF";
+      if (btnCameraToggle) {
+        btnCameraToggle.textContent = "TURN CAMERA ON";
+        btnCameraToggle.className = "btn btn-sm btn-turn-on";
+        btnCameraToggle.disabled = false;
+      }
+      if (elVideoOverlay) {
+        elVideoOverlay.className = "video-overlay";
+        if (elOverlayIcon) elOverlayIcon.textContent = "🛑";
+        if (elOverlayTitle) elOverlayTitle.textContent = "CAMERA OFF";
+        if (elOverlayMsg) elOverlayMsg.textContent = customMsg || "Home surveillance is stopped. Turn on camera to resume monitoring.";
+      }
+      if (btnRetryStream) btnRetryStream.style.display = "none";
+      if (elMetricFps) elMetricFps.textContent = "0.0";
+      if (elMetricResolution) elMetricResolution.textContent = "--";
+      if (elMetricPeopleCount) elMetricPeopleCount.textContent = "0";
+      if (elMetricObjectsCount) elMetricObjectsCount.textContent = "0";
+      if (elMetricLastFrame) elMetricLastFrame.textContent = "--";
+    } else if (state === "STARTING") {
+      elLiveCamStatusPill.className = "status-pill status-starting";
+      elLiveCamStatusText.textContent = "STARTING CAMERA...";
+      if (btnCameraToggle) {
+        btnCameraToggle.textContent = "STARTING...";
+        btnCameraToggle.disabled = true;
+      }
+      if (elVideoOverlay) {
+        elVideoOverlay.className = "video-overlay";
+        if (elOverlayIcon) elOverlayIcon.textContent = "⏳";
+        if (elOverlayTitle) elOverlayTitle.textContent = "STARTING CAMERA...";
+        if (elOverlayMsg) elOverlayMsg.textContent = customMsg || "Initializing physical camera device and perception pipeline...";
+      }
+      if (btnRetryStream) btnRetryStream.style.display = "none";
+    } else if (state === "CONNECTING") {
+      elLiveCamStatusPill.className = "status-pill status-starting";
+      elLiveCamStatusText.textContent = "CONNECTING";
+      if (elVideoOverlay) {
+        elVideoOverlay.className = "video-overlay";
+        if (elOverlayIcon) elOverlayIcon.textContent = "⏳";
+        if (elOverlayTitle) elOverlayTitle.textContent = "CONNECTING";
+        if (elOverlayMsg) elOverlayMsg.textContent = customMsg || "Acquiring authoritative video stream from Device 0...";
+      }
+      if (btnRetryStream) btnRetryStream.style.display = "none";
+    } else if (state === "INTERRUPTED") {
+      elLiveCamStatusPill.className = "status-pill status-error";
+      elLiveCamStatusText.textContent = "STREAM INTERRUPTED";
+      if (elVideoOverlay) {
+        elVideoOverlay.className = "video-overlay";
+        if (elOverlayIcon) elOverlayIcon.textContent = "⚠️";
+        if (elOverlayTitle) elOverlayTitle.textContent = "CAMERA STREAM INTERRUPTED";
+        if (elOverlayMsg) elOverlayMsg.textContent = customMsg || "Stream connection lost. Attempting controlled reconnection...";
+      }
+      if (btnRetryStream) btnRetryStream.style.display = "inline-block";
+    } else if (state === "ERROR" || state === "UNAVAILABLE") {
+      elLiveCamStatusPill.className = "status-pill status-error";
+      elLiveCamStatusText.textContent = "STREAM ERROR";
+      if (elVideoOverlay) {
+        elVideoOverlay.className = "video-overlay";
+        if (elOverlayIcon) elOverlayIcon.textContent = "⚠️";
+        if (elOverlayTitle) elOverlayTitle.textContent = "CAMERA STREAM UNAVAILABLE";
+        if (elOverlayMsg) elOverlayMsg.textContent = customMsg || "Hardware camera or video feed is unavailable.";
+      }
+      if (btnRetryStream) btnRetryStream.style.display = "inline-block";
+    }
+  }
+
+  function attachAdminLiveStream() {
+    if (!elCameraFeed || !currentUser || currentUser.role !== "ADMIN") return;
+    if (!cameraEnabled) {
+      setLiveCameraUI("OFF");
+      return;
+    }
+    if (elCameraFeed.src && elCameraFeed.src.includes("/api/camera/video_feed") && streamConnected) {
+      return;
+    }
+    setLiveCameraUI("CONNECTING");
+    elCameraFeed.src = `/api/camera/video_feed?t=${Date.now()}`;
+  }
+
+  function detachAdminLiveStream() {
+    if (streamReconnectTimer) {
+      clearTimeout(streamReconnectTimer);
+      streamReconnectTimer = null;
+    }
+    if (elCameraFeed) {
+      elCameraFeed.src = "";
+    }
+    streamConnected = false;
+  }
+
+  function scheduleStreamReconnect(delayMs = 3000) {
+    if (streamReconnectTimer) return;
+    if (!cameraEnabled || !currentUser || currentUser.role !== "ADMIN") return;
+    streamReconnectTimer = setTimeout(() => {
+      streamReconnectTimer = null;
+      if (cameraEnabled && currentUser && currentUser.role === "ADMIN") {
+        setLiveCameraUI("CONNECTING", "Reconnecting to live camera stream...");
+        if (elCameraFeed) {
+          elCameraFeed.src = `/api/camera/video_feed?t=${Date.now()}`;
+        }
+      }
+    }, delayMs);
+  }
+
+  function startStreamWatchdog() {
+    if (streamWatchdogTimer) clearInterval(streamWatchdogTimer);
+    streamWatchdogTimer = setInterval(() => {
+      if (!currentUser || currentUser.role !== "ADMIN" || !cameraEnabled) return;
+      if (streamConnected && lastFrameReceivedAt > 0) {
+        const elapsed = Date.now() - lastFrameReceivedAt;
+        if (elapsed > 6000) {
+          streamConnected = false;
+          setLiveCameraUI("INTERRUPTED");
+          scheduleStreamReconnect(2000);
+        }
+      }
+    }, 2000);
   }
 
   // View Switching based on Authenticated Role
@@ -340,6 +536,7 @@
       if (viewAdmin) viewAdmin.style.display = "none";
       if (viewAuth) viewAuth.style.display = "none";
       if (viewGuest) viewGuest.style.display = "block";
+      detachAdminLiveStream();
       return;
     }
 
@@ -355,20 +552,41 @@
 
     if (currentUser.role === "ADMIN") {
       // ADMIN DASHBOARD
+      const adminName = (currentUser.display_name || currentUser.username || "Administrator").trim();
       if (elHeaderRoleBadge) {
-        elHeaderRoleBadge.textContent = "ADMIN / VERIFIED";
+        elHeaderRoleBadge.textContent = `${adminName.toUpperCase()} / ADMIN / VERIFIED`;
         elHeaderRoleBadge.className = "role-badge";
       }
+      const elSubtitle = document.getElementById("header-subtitle");
+      if (elSubtitle) {
+        const hour = new Date().getHours();
+        const greeting = hour < 12 ? "Good morning" : (hour < 18 ? "Good afternoon" : "Good evening");
+        elSubtitle.textContent = `${greeting}, ${adminName} • Continuous Physical Safety Intelligence • Perimeter Protection`;
+      }
+      const btnEditProfile = document.getElementById("btn-edit-admin-profile");
+      if (btnEditProfile) btnEditProfile.style.display = "inline-block";
+
       if (elHeaderIndicators) elHeaderIndicators.style.display = "flex";
       if (viewAdmin) viewAdmin.style.display = "block";
       if (viewAuth) viewAuth.style.display = "none";
       if (viewGuest) viewGuest.style.display = "none";
+      attachAdminLiveStream();
+      startStreamWatchdog();
     } else {
       // AUTHORIZED USER DASHBOARD
+      const userName = (currentUser.display_name || currentUser.username || "Authorized User").trim();
+      detachAdminLiveStream();
       if (elHeaderRoleBadge) {
-        elHeaderRoleBadge.textContent = "AUTHORIZED USER";
+        elHeaderRoleBadge.textContent = `${userName.toUpperCase()} / AUTHORIZED USER`;
         elHeaderRoleBadge.className = "role-badge auth-user";
       }
+      const elSubtitle = document.getElementById("header-subtitle");
+      if (elSubtitle) {
+        elSubtitle.textContent = `Residential Protection • Family & Household Safety Feed`;
+      }
+      const btnEditProfile = document.getElementById("btn-edit-admin-profile");
+      if (btnEditProfile) btnEditProfile.style.display = "none";
+
       if (elHeaderIndicators) elHeaderIndicators.style.display = "none";
       if (viewAdmin) viewAdmin.style.display = "none";
       if (viewAuth) viewAuth.style.display = "block";
@@ -489,16 +707,46 @@
     // B. Live Camera
     const live = data.live || {};
     const cam = ov.camera_status || {};
-    if (elMetricFps) elMetricFps.textContent = typeof live.fps === "number" ? live.fps.toFixed(1) : (cam.fps ? cam.fps.toFixed(1) : "0.0");
-    if (elMetricResolution) {
-      if (cam.resolution?.width) {
-        elMetricResolution.textContent = `${cam.resolution.width}x${cam.resolution.height}`;
-      } else {
-        elMetricResolution.textContent = "640x480";
+
+    if (typeof live.enabled === "boolean") {
+      const wasEnabled = cameraEnabled;
+      cameraEnabled = live.enabled;
+      if (!cameraEnabled) {
+        setLiveCameraUI("OFF");
+        detachAdminLiveStream();
+      } else if (!wasEnabled && cameraEnabled && currentUser?.role === "ADMIN") {
+        attachAdminLiveStream();
       }
     }
-    if (elMetricPeopleCount) elMetricPeopleCount.textContent = live.active_people?.length || 0;
-    if (elMetricObjectsCount) elMetricObjectsCount.textContent = live.active_objects?.length || 0;
+
+    if (cameraEnabled) {
+      if (streamConnected) {
+        setLiveCameraUI("LIVE");
+      }
+      if (elMetricFps) elMetricFps.textContent = typeof live.fps === "number" ? live.fps.toFixed(1) : (cam.fps ? cam.fps.toFixed(1) : "0.0");
+      if (elMetricResolution) {
+        if (live.resolution?.width) {
+          elMetricResolution.textContent = `${live.resolution.width}x${live.resolution.height}`;
+        } else if (cam.resolution?.width) {
+          elMetricResolution.textContent = `${cam.resolution.width}x${cam.resolution.height}`;
+        } else {
+          elMetricResolution.textContent = "640x480";
+        }
+      }
+      if (elMetricPeopleCount) elMetricPeopleCount.textContent = live.active_people?.length || 0;
+      if (elMetricObjectsCount) elMetricObjectsCount.textContent = live.active_objects?.length || 0;
+      if (elMetricLastFrame) {
+        if (lastFrameReceivedAt > 0) {
+          const secAgo = Math.max(0, Math.round((Date.now() - lastFrameReceivedAt) / 1000));
+          elMetricLastFrame.textContent = secAgo === 0 ? "Just now" : `${secAgo}s ago`;
+        } else if (live.last_frame_timestamp) {
+          const secAgo = Math.max(0, Math.round((Date.now() / 1000) - live.last_frame_timestamp));
+          elMetricLastFrame.textContent = `${secAgo}s ago`;
+        } else {
+          elMetricLastFrame.textContent = "--";
+        }
+      }
+    }
 
     // C. People (Real observed people)
     const people = data.people || [];
@@ -514,34 +762,127 @@
               <span class="badge ${p.is_authorized ? 'badge-live' : 'badge-subtle'}">${p.is_authorized ? 'AUTHORIZED' : 'NON-AUTHORIZED'}</span>
             </div>
             <div class="person-meta">
-              <span>TRACK ID: #${escapeHtml(p.track_id)}</span>
+              <span>TRACK ID: #${escapeHtml(p.track_id !== undefined ? p.track_id : '--')}</span>
               <span>STATE: ${escapeHtml(p.movement_state || 'stationary')}</span>
               <span>PRESENCE: <strong class="${p.current_presence ? 'text-green' : 'text-dim'}">${p.current_presence ? 'IN VIEW' : 'EXITED'}</strong></span>
-              <span>ENTERED: ${escapeHtml(p.entry_time ? p.entry_time.split('T')[1]?.split('.')[0] : '--')}</span>
+              <span>ENTERED: ${escapeHtml(p.entry_time ? formatLocalTime(p.entry_time) : '--')}</span>
             </div>
           </div>
         `).join("");
       }
     }
 
-    // D. Activity Feed
+    // D. Activity Feed (6 Columns: TIME, WHAT HAPPENED, WHO / OBJECT, ACTIVITY, STATUS, TRACE)
     const events = data.activity || [];
     if (elEventsCountBadge) elEventsCountBadge.textContent = `${events.length} RECENT`;
     if (elEventsTbody) {
       if (events.length === 0) {
-        elEventsTbody.innerHTML = '<tr><td colspan="5" class="empty-table">Awaiting events from perception engine...</td></tr>';
+        elEventsTbody.innerHTML = '<tr><td colspan="6" class="empty-table">Awaiting events from perception engine...</td></tr>';
       } else {
         elEventsTbody.innerHTML = events.slice(0, 25).map(e => {
-          const tsShort = e.timestamp ? e.timestamp.replace("T", " ").split(".")[0] : "--";
+          const timeStr = formatLocalTime(e.timestamp);
+          const fullTimeStr = formatLocalDateTime(e.timestamp);
           const conf = typeof e.confidence === "number" ? `${Math.round(e.confidence * 100)}%` : "--";
+
+          // Human-readable WHAT HAPPENED
+          let whatHappened = e.metadata?.summary || (e.event_type ? e.event_type.replace(/_/g, " ") : "--");
+
+          // WHO / OBJECT
+          let whoObject = "NOT ASSOCIATED";
+          if (e.metadata?.person_name) {
+            whoObject = e.metadata.person_name;
+          } else if (e.person_id) {
+            whoObject = `@${e.person_id}`;
+          } else if (e.object_id) {
+            whoObject = e.object_id;
+          } else if (e.track_id !== undefined && e.track_id !== null && e.track_id !== "--") {
+            whoObject = `TRACK ${e.track_id}`;
+          }
+
+          // ACTIVITY
+          let activityStr = "Stationary";
+          if (e.metadata?.action) {
+            activityStr = e.metadata.action;
+          } else if (e.event_type?.includes("WALK")) {
+            activityStr = "Walking";
+          } else if (e.event_type?.includes("STAND")) {
+            activityStr = "Standing";
+          } else if (e.event_type?.includes("SIT")) {
+            activityStr = "Sitting";
+          } else if (e.event_type?.includes("ENTER")) {
+            activityStr = "Entered area";
+          } else if (e.event_type?.includes("LEFT") || e.event_type?.includes("LEAVE")) {
+            activityStr = "Departed area";
+          } else if (e.movement_state) {
+            activityStr = e.movement_state;
+          }
+
+          // STATUS (ACTIVE, RESOLVED, OBSERVED)
+          const status = e.status || "OBSERVED";
+          const statusClass = status === "ACTIVE" ? "badge-live" : (status === "RESOLVED" ? "badge-subtle" : "badge-stale");
+
+          // TRACE (never '#--', display TRACK <id> or NOT ASSOCIATED)
+          const trackLabel = (e.track_id !== undefined && e.track_id !== null && e.track_id !== "--") ? `TRACK ${e.track_id}` : "NOT ASSOCIATED";
+          const eventIdShort = e.event_id ? e.event_id.substring(0, 8) + ".." : "--";
+          const ruleStr = e.rule_id || "--";
+
           return `
             <tr>
-              <td>${escapeHtml(tsShort)}</td>
-              <td><strong>${escapeHtml(e.event_type || "--")}</strong></td>
-              <td>#${escapeHtml(e.track_id !== undefined ? e.track_id : "--")}</td>
-              <td>${escapeHtml(conf)}</td>
-              <td><span class="badge ${e.status === 'ACTIVE' ? 'badge-live' : 'badge-subtle'}">${escapeHtml(e.status || "--")}</span></td>
+              <td title="${escapeHtml(fullTimeStr)}"><strong>${escapeHtml(timeStr)}</strong></td>
+              <td><strong>${escapeHtml(whatHappened)}</strong></td>
+              <td><span class="badge badge-subtle">${escapeHtml(whoObject)}</span></td>
+              <td>${escapeHtml(activityStr)}</td>
+              <td><span class="badge ${statusClass}">${escapeHtml(status)}</span></td>
+              <td>
+                <details style="cursor: pointer; font-size: 10px; font-family: var(--font-mono);">
+                  <summary style="outline: none; color: var(--accent-cyan); font-weight: 600;">${escapeHtml(trackLabel)}</summary>
+                  <div style="margin-top: 4px; padding: 4px 6px; background: rgba(0,0,0,0.3); border-radius: 4px; font-size: 9px; line-height: 1.4; color: var(--text-dim);">
+                    <div>Event: <code>${escapeHtml(eventIdShort)}</code></div>
+                    <div>Conf: <code>${escapeHtml(conf)}</code></div>
+                    <div>Rule: <code>${escapeHtml(ruleStr)}</code></div>
+                  </div>
+                </details>
+              </td>
             </tr>
+          `;
+        }).join("");
+      }
+    }
+
+    const elEventsTimelineView = document.getElementById("events-timeline-view");
+    if (elEventsTimelineView) {
+      if (events.length === 0) {
+        elEventsTimelineView.innerHTML = '<div class="empty-state">Awaiting timeline events...</div>';
+      } else {
+        elEventsTimelineView.innerHTML = events.slice(0, 20).map(e => {
+          const timeStr = formatLocalTime(e.timestamp);
+          const fullTimeStr = formatLocalDateTime(e.timestamp);
+          const trackLabel = (e.track_id !== undefined && e.track_id !== null && e.track_id !== "--") ? `Track ${e.track_id}` : 'Perimeter Observation';
+          const pName = e.metadata?.person_name || trackLabel;
+          const attrs = e.metadata?.visual_attributes || {};
+          let attrNotes = [];
+          if (attrs.upper_color) attrNotes.push(`Wearing ${attrs.upper_color} top`);
+          if (attrs.lower_color) attrNotes.push(`${attrs.lower_color} pants`);
+          if (attrs.movement_direction) attrNotes.push(`Moving ${attrs.movement_direction}`);
+          if (e.metadata?.carried_objects && e.metadata.carried_objects.length > 0) {
+            attrNotes.push(`Carrying: ${e.metadata.carried_objects.map(c => c.label).join(", ")}`);
+          }
+          const attrStr = attrNotes.join(" • ");
+          const isAlert = e.event_type?.includes("BREACH") || e.event_type?.includes("ALERT") || e.event_type?.includes("THREAT");
+
+          return `
+            <div class="timeline-card ${isAlert ? 'alert' : ''}">
+              <div class="timeline-time" title="${escapeHtml(fullTimeStr)}">${escapeHtml(timeStr)}</div>
+              <div class="timeline-content">
+                <div class="timeline-title-row">
+                  <span class="timeline-event-name">${escapeHtml(e.event_type ? e.event_type.replace(/_/g, " ") : "--")}</span>
+                  <span class="badge ${e.status === 'ACTIVE' ? 'badge-live' : (e.status === 'RESOLVED' ? 'badge-subtle' : 'badge-stale')}" style="font-size: 9px;">${escapeHtml(e.status || 'OBSERVED')}</span>
+                </div>
+                <div class="timeline-meta">
+                  <strong>${escapeHtml(pName)}</strong> ${attrStr ? `<span style="color: var(--text-dim);">— ${escapeHtml(attrStr)}</span>` : ''}
+                </div>
+              </div>
+            </div>
           `;
         }).join("");
       }
@@ -581,7 +922,7 @@
           const isAck = inc.status === "ACKNOWLEDGED";
           const sev = inc.severity || "LOW";
           const sevClass = sev === "CRITICAL" ? "badge-disconnected" : (sev === "HIGH" ? "badge-stale" : "badge-subtle");
-          const createdShort = inc.created_at ? inc.created_at.replace("T", " ").split(".")[0] : "--";
+          const createdShort = formatLocalDateTime(inc.created_at);
           const summaryText = inc.metadata?.summary || inc.incident_type || "Physical security event";
 
           return `
@@ -624,7 +965,7 @@
             </div>
             <div class="person-meta" style="margin-bottom: 8px;">
               <span>INCIDENT: ${escapeHtml(ev.incident_id?.substring(0, 10))}..</span>
-              <span>CAPTURED: ${escapeHtml(ev.timestamp ? ev.timestamp.replace('T', ' ').split('.')[0] : '--')}</span>
+              <span>CAPTURED: ${escapeHtml(formatLocalDateTime(ev.timestamp))}</span>
               <span>SIZE: ${escapeHtml(Math.round((ev.file_size_bytes || 0) / 1024))} KB</span>
             </div>
             <div style="font-size: 11px; margin-bottom: 8px; font-family: var(--font-mono); word-break: break-all;">
@@ -644,7 +985,7 @@
         elAdminLoginsTbody.innerHTML = '<tr><td colspan="6" class="empty-table">No recent login records.</td></tr>';
       } else {
         elAdminLoginsTbody.innerHTML = logins.map(l => {
-          const tsShort = l.timestamp ? l.timestamp.replace("T", " ").split(".")[0] : "--";
+          const tsShort = formatLocalDateTime(l.timestamp);
           const isSuccess = l.status === "SUCCESS";
           const facePct = typeof l.face_confidence === "number" ? `${Math.round(l.face_confidence * 100)}%` : "--";
           return `
@@ -669,7 +1010,7 @@
         elAdminAuditTbody.innerHTML = '<tr><td colspan="6" class="empty-table">No audit records logged.</td></tr>';
       } else {
         elAdminAuditTbody.innerHTML = audits.map(a => {
-          const tsShort = a.timestamp ? a.timestamp.replace("T", " ").split(".")[0] : "--";
+          const tsShort = formatLocalDateTime(a.timestamp);
           const transition = (a.previous_state || a.new_state) ? `${escapeHtml(a.previous_state || "None")} → ${escapeHtml(a.new_state || "None")}` : "--";
           return `
             <tr>
@@ -742,7 +1083,7 @@
         elAdminNotifsTbody.innerHTML = '<tr><td colspan="8" class="empty-table">No notification events recorded.</td></tr>';
       } else {
         elAdminNotifsTbody.innerHTML = notificationItems.map(n => {
-          const tsShort = n.created_at ? n.created_at.replace("T", " ").split(".")[0] : "--";
+          const tsShort = formatLocalDateTime(n.created_at);
           const isDelivered = n.status === "DELIVERED";
           const isFailed = n.status === "FAILED";
           const isAck = n.status === "ACKNOWLEDGED";
@@ -786,7 +1127,9 @@
         const isAdmin = u.role === "ADMIN";
         const isActive = u.is_active;
         const faceEnrolled = !!u.face_enrolled;
-        const lastLoginShort = u.last_login_at ? u.last_login_at.replace("T", " ").split(".")[0] : "Never";
+        const lastLoginShort = u.last_login_at ? formatLocalDateTime(u.last_login_at) : "Never";
+        const relStr = u.relationship || "Household Member";
+        const phoneStr = u.phone_number || "--";
 
         html += `
           <div class="user-slot-card occupied">
@@ -795,21 +1138,25 @@
                 <span class="slot-number-tag">SLOT ${i}</span>
                 <div style="display: flex; gap: 4px;">
                   <span class="badge ${faceEnrolled ? 'badge-live' : 'badge-stale'}" style="font-size: 9px;">${faceEnrolled ? 'FACE ENROLLED' : 'NO FACE'}</span>
-                  <span class="badge ${isActive ? 'badge-live' : 'badge-subtle'}" style="font-size: 9px;">${isActive ? 'ACTIVE' : 'DISABLED'}</span>
+                  <span class="badge ${isActive ? 'badge-live' : 'badge-subtle'}" style="font-size: 9px;">${isActive ? 'ACTIVE' : 'DEACTIVATED'}</span>
                 </div>
               </div>
               <div class="slot-user-name">${escapeHtml(u.display_name || u.username)}</div>
               <div class="slot-username">@${escapeHtml(u.username)}</div>
-              <span class="role-badge ${isAdmin ? '' : 'auth-user'}" style="font-size: 9px;">${escapeHtml(u.role)}</span>
-              <div style="font-size: 10px; color: var(--text-dim); margin-top: 8px; font-family: var(--font-mono);">
-                LAST LOGIN: ${escapeHtml(lastLoginShort)}
+              <div style="display: flex; gap: 6px; align-items: center; margin: 4px 0 6px;">
+                <span class="role-badge ${isAdmin ? '' : 'auth-user'}" style="font-size: 9px;">${escapeHtml(u.role)}</span>
+                <span class="badge badge-subtle" style="font-size: 9px;">${escapeHtml(relStr)}</span>
+              </div>
+              <div style="font-size: 10px; color: var(--text-dim); margin-top: 6px; font-family: var(--font-mono); line-height: 1.4;">
+                <div>PHONE: ${escapeHtml(phoneStr)}</div>
+                <div>LAST LOGIN: ${escapeHtml(lastLoginShort)}</div>
               </div>
             </div>
             <div class="slot-actions">
-              <button class="btn btn-xs btn-outline" data-action="edit-user" data-uid="${escapeHtml(u.user_id)}" data-username="${escapeHtml(u.username)}" data-name="${escapeHtml(u.display_name)}" data-role="${escapeHtml(u.role)}" data-active="${isActive}">EDIT</button>
-              <button class="btn btn-xs btn-outline-cyan" data-action="enroll-user-face" data-uid="${escapeHtml(u.user_id)}" data-name="${escapeHtml(u.display_name || u.username)}">ENROLL FACE</button>
+              <button class="btn btn-xs btn-outline" data-action="edit-user" data-uid="${escapeHtml(u.user_id)}" data-username="${escapeHtml(u.username)}" data-name="${escapeHtml(u.display_name || '')}" data-role="${escapeHtml(u.role)}" data-relationship="${escapeHtml(u.relationship || 'Family')}" data-phone="${escapeHtml(u.phone_number || '')}" data-active="${isActive}">EDIT</button>
+              <button class="btn btn-xs btn-outline-cyan" data-action="manage-face" data-uid="${escapeHtml(u.user_id)}" data-name="${escapeHtml(u.display_name || u.username)}" data-username="${escapeHtml(u.username)}" data-enrolled="${faceEnrolled}">MANAGE FACE</button>
               <button class="btn btn-xs ${isActive ? 'btn-outline-danger' : 'btn-outline'}" data-action="toggle-active" data-uid="${escapeHtml(u.user_id)}" data-active="${isActive}">${isActive ? 'DISABLE' : 'ENABLE'}</button>
-              ${!isAdmin ? `<button class="btn btn-xs btn-outline-danger" data-action="delete-user" data-uid="${escapeHtml(u.user_id)}" data-name="${escapeHtml(u.display_name || u.username)}">REMOVE</button>` : ''}
+              ${!isAdmin ? `<button class="btn btn-xs btn-outline-danger" data-action="remove-user" data-uid="${escapeHtml(u.user_id)}" data-name="${escapeHtml(u.display_name || u.username)}" data-username="${escapeHtml(u.username)}">REMOVE</button>` : ''}
             </div>
           </div>
         `;
@@ -818,7 +1165,7 @@
           <div class="user-slot-card empty">
             <span class="slot-number-tag">SLOT ${i}</span>
             <div style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);">AVAILABLE IDENTITY SLOT</div>
-            <button class="btn btn-xs btn-primary" data-action="open-add-user" data-slot="${i}">+ ADD USER</button>
+            <button class="btn btn-xs btn-primary" data-action="open-add-user" data-slot="${i}">+ ADD AUTHORIZED USER</button>
           </div>
         `;
       }
@@ -1101,7 +1448,7 @@
 
         // Refresh hardware video feed
         if (faceVideoPreview) {
-          faceVideoPreview.src = "/api/camera/video_feed?t=" + Date.now();
+          faceVideoPreview.src = "/api/camera/video_feed?temp_token=" + encodeURIComponent(tempAuthToken) + "&t=" + Date.now();
         }
 
       } catch (err) {
@@ -1141,7 +1488,11 @@
           btnCaptureFace.disabled = false;
           if (valVerifyStatus) valVerifyStatus.textContent = "FAILED";
           if (faceError) {
-            faceError.textContent = data.details || data.error || "Biometric verification failed.";
+            if (data.status === "CAMERA_UNAVAILABLE" || (data.details && data.details.includes("OFF"))) {
+              faceError.textContent = "Camera is currently OFF. Turn on the camera to continue biometric verification.";
+            } else {
+              faceError.textContent = data.details || data.error || "Biometric verification failed.";
+            }
             faceError.style.display = "block";
           }
           if (faceStatusMsg) {
@@ -1188,6 +1539,101 @@
   // =========================================================================
   // ADMIN DASHBOARD INTERACTIONS
   // =========================================================================
+
+  // Live Camera Feed Event Handlers
+  if (elCameraFeed) {
+    elCameraFeed.onload = () => {
+      lastFrameReceivedAt = Date.now();
+      streamConnected = true;
+      if (cameraEnabled) {
+        setLiveCameraUI("LIVE");
+      }
+    };
+    elCameraFeed.onerror = () => {
+      streamConnected = false;
+      if (!cameraEnabled) {
+        setLiveCameraUI("OFF");
+        return;
+      }
+      setLiveCameraUI("ERROR", "Failed to connect to camera stream.");
+      scheduleStreamReconnect(3000);
+    };
+  }
+
+  // Camera ON / OFF Control & Modal Listeners
+  if (btnCameraToggle) {
+    btnCameraToggle.addEventListener("click", () => {
+      if (cameraEnabled) {
+        if (modalCameraConfirm) modalCameraConfirm.style.display = "flex";
+      } else {
+        handleCameraControl(true);
+      }
+    });
+  }
+
+  if (btnCloseCameraConfirm) {
+    btnCloseCameraConfirm.addEventListener("click", () => {
+      if (modalCameraConfirm) modalCameraConfirm.style.display = "none";
+    });
+  }
+  if (btnCancelCameraOff) {
+    btnCancelCameraOff.addEventListener("click", () => {
+      if (modalCameraConfirm) modalCameraConfirm.style.display = "none";
+    });
+  }
+  if (btnConfirmCameraOff) {
+    btnConfirmCameraOff.addEventListener("click", async () => {
+      if (modalCameraConfirm) modalCameraConfirm.style.display = "none";
+      await handleCameraControl(false);
+    });
+  }
+
+  if (btnRetryStream) {
+    btnRetryStream.addEventListener("click", () => {
+      if (cameraEnabled) {
+        setLiveCameraUI("CONNECTING", "Retrying stream connection...");
+        if (elCameraFeed) elCameraFeed.src = `/api/camera/video_feed?t=${Date.now()}`;
+      }
+    });
+  }
+
+  async function handleCameraControl(enable) {
+    if (btnCameraToggle) btnCameraToggle.disabled = true;
+    if (enable) {
+      setLiveCameraUI("STARTING");
+    }
+
+    try {
+      const resp = await fetch("/api/camera/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: enable }),
+        credentials: "same-origin",
+      });
+
+      const data = await resp.json();
+      if (!resp.ok) {
+        alert(data.details || data.error || "Failed to update camera state.");
+        if (btnCameraToggle) btnCameraToggle.disabled = false;
+        return;
+      }
+
+      cameraEnabled = data.camera_enabled;
+      if (cameraEnabled) {
+        setTimeout(() => {
+          attachAdminLiveStream();
+        }, 600);
+      } else {
+        detachAdminLiveStream();
+        setLiveCameraUI("OFF");
+      }
+
+      pollDashboard();
+    } catch (err) {
+      alert(`Network error updating camera: ${err.message}`);
+      if (btnCameraToggle) btnCameraToggle.disabled = false;
+    }
+  }
 
   // Admin Incidents Click Handling
   if (elIncidentsList) {
@@ -1237,6 +1683,75 @@
     });
   }
 
+  // =========================================================================
+  // GUIDED 4-STEP BIOMETRIC ENROLLMENT WIZARD STATE & HANDLERS
+  // =========================================================================
+  let guidedEnrollUserId = null;
+  let guidedEnrollUserName = null;
+  let guidedEnrollSamplesCount = 0;
+
+  function resetGuidedEnrollmentModal() {
+    guidedEnrollUserId = null;
+    guidedEnrollUserName = null;
+    guidedEnrollSamplesCount = 0;
+
+    const step1 = document.getElementById("add-step-1-pane");
+    const step2 = document.getElementById("add-step-2-pane");
+    const step3 = document.getElementById("add-step-3-pane");
+    const step4 = document.getElementById("add-step-4-pane");
+    if (step1) step1.style.display = "block";
+    if (step2) step2.style.display = "none";
+    if (step3) step3.style.display = "none";
+    if (step4) step4.style.display = "none";
+
+    _updateStepIndicator(1);
+
+    for (let i = 1; i <= 5; i++) {
+      const slot = document.getElementById(`sample-slot-${i}`);
+      if (slot) {
+        slot.className = "sample-slot-card";
+        slot.innerHTML = `<span class="slot-num">${i}</span> <span class="slot-stat">EMPTY</span>`;
+      }
+    }
+
+    const btnCap = document.getElementById("btn-capture-sample");
+    const btnFuse = document.getElementById("btn-fuse-and-activate");
+    const feedText = document.getElementById("enroll-sample-feedback");
+    const errText = document.getElementById("enroll-sample-error");
+    const countNum = document.getElementById("sample-count-num");
+
+    if (btnCap) {
+      btnCap.style.display = "inline-block";
+      btnCap.disabled = false;
+    }
+    if (btnFuse) btnFuse.style.display = "none";
+    if (feedText) feedText.textContent = "Sample progress: 0 of 5 captured. Face camera directly.";
+    if (errText) errText.style.display = "none";
+    if (countNum) countNum.textContent = "1";
+    if (elAddUserError) elAddUserError.style.display = "none";
+  }
+
+  function _updateStepIndicator(currentStep) {
+    for (let i = 1; i <= 4; i++) {
+      const pill = document.getElementById(`add-step-pill-${i}`);
+      if (pill) {
+        if (i < currentStep) {
+          pill.className = "stage-step done";
+        } else if (i === currentStep) {
+          pill.className = "stage-step active";
+        } else {
+          pill.className = "stage-step";
+        }
+      }
+      if (i < 4) {
+        const conn = document.getElementById(`add-step-conn-${i}`);
+        if (conn) {
+          conn.className = i < currentStep ? "stage-connector active" : "stage-connector";
+        }
+      }
+    }
+  }
+
   // Admin User Slot Management Click Handling
   if (elAdminUserSlotsGrid) {
     elAdminUserSlotsGrid.addEventListener("click", async (e) => {
@@ -1245,46 +1760,30 @@
       const action = btn.dataset.action;
 
       if (action === "open-add-user") {
-        elAddUserError.style.display = "none";
-        formAddUser.reset();
+        resetGuidedEnrollmentModal();
+        if (formAddUser) formAddUser.reset();
         modalAddUser.style.display = "flex";
       } else if (action === "edit-user") {
         inputEditUserId.value = btn.dataset.uid;
         inputEditUsername.value = btn.dataset.username;
         inputEditDisplayName.value = btn.dataset.name;
-        selectEditRole.value = btn.dataset.role;
+        if (selectEditRelationship) selectEditRelationship.value = btn.dataset.relationship || "Family";
+        if (inputEditPhone) inputEditPhone.value = btn.dataset.phone || "";
         checkEditIsActive.checked = btn.dataset.active === "true";
         if (inputEditPassword) inputEditPassword.value = "";
         elEditUserError.style.display = "none";
         modalEditUser.style.display = "flex";
-      } else if (action === "enroll-user-face") {
-        const uid = btn.dataset.uid;
-        const name = btn.dataset.name;
-        if (!confirm(`Enroll face for "${name}" using live hardware camera frame? Please ensure the user is facing the camera.`)) {
-          return;
-        }
-        btn.disabled = true;
-        btn.textContent = "ENROLLING...";
-        try {
-          const resp = await fetch(`/api/admin/users/${encodeURIComponent(uid)}/face/enroll`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
-            credentials: "same-origin",
-          });
-          const data = await resp.json();
-          if (!resp.ok) {
-            alert(`Face enrollment failed: ${data.details || data.error || 'Face not detected in camera frame'}`);
-          } else {
-            alert(`✓ Face enrolled successfully for ${name}! Biometric 1856-D template stored in secure vault.`);
-            pollDashboard();
-          }
-        } catch (err) {
-          alert(`Face enrollment network error: ${err.message}`);
-        } finally {
-          btn.disabled = false;
-          btn.textContent = "ENROLL FACE";
-        }
+      } else if (action === "manage-face") {
+        inputFaceMgmtUserId.value = btn.dataset.uid;
+        elFaceMgmtUserName.textContent = btn.dataset.name;
+        elFaceMgmtUserHandle.textContent = `@${btn.dataset.username}`;
+        const enrolled = btn.dataset.enrolled === "true";
+        elFaceMgmtStatusBadge.textContent = enrolled ? "1856-D BIOMETRIC ENROLLED" : "NO FACE ENROLLED";
+        elFaceMgmtStatusBadge.className = `badge ${enrolled ? 'badge-live' : 'badge-stale'}`;
+        elFaceMgmtError.style.display = "none";
+        btnActionRemoveFace.style.display = enrolled ? "inline-block" : "none";
+        btnActionReplaceFace.textContent = enrolled ? "REPLACE FACE →" : "ENROLL FACE →";
+        modalManageFace.style.display = "flex";
       } else if (action === "toggle-active") {
         const uid = btn.dataset.uid;
         const currentActive = btn.dataset.active === "true";
@@ -1299,39 +1798,201 @@
         } catch (err) {
           alert(`Toggle active failed: ${err.message}`);
         }
-      } else if (action === "delete-user") {
-        const uid = btn.dataset.uid;
-        const name = btn.dataset.name;
-        if (!confirm(`Are you sure you want to remove user "${name}"? This slot will become available.`)) return;
-        try {
-          const resp = await fetch(`/api/admin/users/${encodeURIComponent(uid)}`, {
-            method: "DELETE",
-            credentials: "same-origin",
-          });
-          if (resp.ok) pollDashboard();
-        } catch (err) {
-          alert(`Delete user failed: ${err.message}`);
+      } else if (action === "remove-user") {
+        inputRemoveUserId.value = btn.dataset.uid;
+        elRemoveUserName.textContent = btn.dataset.name;
+        elRemoveUserHandle.textContent = `@${btn.dataset.username}`;
+        elRemoveUserError.style.display = "none";
+        modalRemoveUser.style.display = "flex";
+      }
+    });
+  }
+
+  // Edit User Form Submission
+  if (formEditUser) {
+    formEditUser.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (elEditUserError) elEditUserError.style.display = "none";
+
+      const uid = inputEditUserId.value;
+      const username = inputEditUsername.value.trim();
+      const displayName = inputEditDisplayName.value.trim();
+      const relationship = selectEditRelationship ? selectEditRelationship.value : "Family";
+      const phone = inputEditPhone ? inputEditPhone.value.trim() : null;
+      const isActive = checkEditIsActive.checked;
+      const password = inputEditPassword.value;
+
+      const payload = {
+        username: username,
+        display_name: displayName,
+        relationship: relationship,
+        phone_number: phone,
+        is_active: isActive,
+      };
+      if (password) {
+        payload.password = password;
+      }
+
+      try {
+        const resp = await fetch(`/api/admin/users/${encodeURIComponent(uid)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          credentials: "same-origin",
+        });
+
+        const data = await resp.json();
+        if (!resp.ok) {
+          elEditUserError.textContent = data.details || data.error || "Failed to update user.";
+          elEditUserError.style.display = "block";
+          return;
+        }
+
+        modalEditUser.style.display = "none";
+        pollDashboard();
+      } catch (err) {
+        if (elEditUserError) {
+          elEditUserError.textContent = `Network error: ${err.message}`;
+          elEditUserError.style.display = "block";
         }
       }
     });
   }
 
-  // Add User Form Submit
+  if (btnCloseEditUser) btnCloseEditUser.addEventListener("click", () => { modalEditUser.style.display = "none"; });
+  if (btnCancelEditUser) btnCancelEditUser.addEventListener("click", () => { modalEditUser.style.display = "none"; });
+
+  // Remove User Confirmation
+  if (btnCloseRemoveUser) btnCloseRemoveUser.addEventListener("click", () => { modalRemoveUser.style.display = "none"; });
+  if (btnCancelRemoveUser) btnCancelRemoveUser.addEventListener("click", () => { modalRemoveUser.style.display = "none"; });
+
+  if (btnConfirmRemoveUser) {
+    btnConfirmRemoveUser.addEventListener("click", async () => {
+      const uid = inputRemoveUserId.value;
+      if (!uid) return;
+      btnConfirmRemoveUser.disabled = true;
+      if (elRemoveUserError) elRemoveUserError.style.display = "none";
+
+      try {
+        const resp = await fetch(`/api/admin/users/${encodeURIComponent(uid)}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+        });
+
+        const data = await resp.json();
+        btnConfirmRemoveUser.disabled = false;
+
+        if (!resp.ok) {
+          if (elRemoveUserError) {
+            elRemoveUserError.textContent = data.details || data.error || "Failed to remove user.";
+            elRemoveUserError.style.display = "block";
+          }
+          return;
+        }
+
+        modalRemoveUser.style.display = "none";
+        pollDashboard();
+      } catch (err) {
+        btnConfirmRemoveUser.disabled = false;
+        if (elRemoveUserError) {
+          elRemoveUserError.textContent = `Network error: ${err.message}`;
+          elRemoveUserError.style.display = "block";
+        }
+      }
+    });
+  }
+
+  // Manage Face Actions
+  if (btnCloseManageFace) btnCloseManageFace.addEventListener("click", () => { modalManageFace.style.display = "none"; });
+
+  if (btnActionReplaceFace) {
+    btnActionReplaceFace.addEventListener("click", () => {
+      const uid = inputFaceMgmtUserId.value;
+      const name = elFaceMgmtUserName.textContent;
+      modalManageFace.style.display = "none";
+
+      // Direct launch of multi-sample enrollment for this user
+      guidedEnrollUserId = uid;
+      guidedEnrollUserName = name;
+      resetGuidedEnrollmentModal();
+
+      document.getElementById("add-step-1-pane").style.display = "none";
+      document.getElementById("add-step-2-pane").style.display = "none";
+      document.getElementById("add-step-3-pane").style.display = "block";
+      _updateStepIndicator(3);
+
+      const enrollPreview = document.getElementById("enroll-video-preview");
+      if (enrollPreview) {
+        enrollPreview.src = "/api/camera/video_feed?t=" + Date.now();
+      }
+      modalAddUser.style.display = "flex";
+    });
+  }
+
+  if (btnActionRemoveFace) {
+    btnActionRemoveFace.addEventListener("click", async () => {
+      const uid = inputFaceMgmtUserId.value;
+      if (!uid) return;
+      btnActionRemoveFace.disabled = true;
+      if (elFaceMgmtError) elFaceMgmtError.style.display = "none";
+
+      try {
+        const resp = await fetch(`/api/admin/users/${encodeURIComponent(uid)}/face/remove`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+        });
+
+        const data = await resp.json();
+        btnActionRemoveFace.disabled = false;
+
+        if (!resp.ok) {
+          if (elFaceMgmtError) {
+            elFaceMgmtError.textContent = data.details || data.error || "Failed to remove face template.";
+            elFaceMgmtError.style.display = "block";
+          }
+          return;
+        }
+
+        modalManageFace.style.display = "none";
+        pollDashboard();
+      } catch (err) {
+        btnActionRemoveFace.disabled = false;
+        if (elFaceMgmtError) {
+          elFaceMgmtError.textContent = `Network error: ${err.message}`;
+          elFaceMgmtError.style.display = "block";
+        }
+      }
+    });
+  }
+
+  // Step 1: Submit Form to Create Draft User
   if (formAddUser) {
     formAddUser.addEventListener("submit", async (e) => {
       e.preventDefault();
-      elAddUserError.style.display = "none";
+      if (elAddUserError) elAddUserError.style.display = "none";
 
       const username = inputNewUsername.value.trim();
       const displayName = inputNewDisplayName.value.trim();
       const password = inputNewPassword.value;
-      const role = selectNewRole.value;
+      const role = selectNewRole ? selectNewRole.value : "AUTHORIZED_USER";
+      const phoneInput = document.getElementById("new-phone");
+      const phoneNumber = phoneInput ? phoneInput.value.trim() : null;
+      const relInput = document.getElementById("new-relationship");
+      const relationship = relInput ? relInput.value : "Family";
 
       try {
         const resp = await fetch("/api/admin/users", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, display_name: displayName, password, role }),
+          body: JSON.stringify({
+            username,
+            display_name: displayName,
+            password,
+            role,
+            phone_number: phoneNumber,
+            relationship: relationship,
+          }),
           credentials: "same-origin",
         });
 
@@ -1342,17 +2003,508 @@
           return;
         }
 
-        modalAddUser.style.display = "none";
-        pollDashboard();
+        // Advance to Step 2 (Draft Account Confirmation)
+        guidedEnrollUserId = data.user_id;
+        guidedEnrollUserName = displayName || username;
+
+        const draftDisplay = document.getElementById("draft-user-display");
+        const draftId = document.getElementById("draft-user-id");
+        if (draftDisplay) draftDisplay.textContent = `${guidedEnrollUserName} (@${username})`;
+        if (draftId) draftId.textContent = guidedEnrollUserId;
+
+        document.getElementById("add-step-1-pane").style.display = "none";
+        document.getElementById("add-step-2-pane").style.display = "block";
+        _updateStepIndicator(2);
+
       } catch (err) {
-        elAddUserError.textContent = `Network error: ${err.message}`;
-        elAddUserError.style.display = "block";
+        if (elAddUserError) {
+          elAddUserError.textContent = `Network error: ${err.message}`;
+          elAddUserError.style.display = "block";
+        }
       }
+    });
+  }
+
+  // Step 2 Buttons
+  const btnStartBio = document.getElementById("btn-start-biometrics");
+  if (btnStartBio) {
+    btnStartBio.addEventListener("click", () => {
+      document.getElementById("add-step-2-pane").style.display = "none";
+      document.getElementById("add-step-3-pane").style.display = "block";
+      _updateStepIndicator(3);
+
+      const enrollPreview = document.getElementById("enroll-video-preview");
+      if (enrollPreview) {
+        enrollPreview.src = "/api/camera/video_feed?t=" + Date.now();
+      }
+    });
+  }
+
+  const btnCancelDraft = document.getElementById("btn-cancel-draft");
+  if (btnCancelDraft) {
+    btnCancelDraft.addEventListener("click", () => {
+      modalAddUser.style.display = "none";
+      pollDashboard();
+    });
+  }
+
+  // Step 3: Capture Biometric Sample
+  const btnCaptureSample = document.getElementById("btn-capture-sample");
+  if (btnCaptureSample) {
+    btnCaptureSample.addEventListener("click", async () => {
+      if (!guidedEnrollUserId) {
+        alert("No active user enrollment session.");
+        return;
+      }
+      const feedback = document.getElementById("enroll-sample-feedback");
+      const errEl = document.getElementById("enroll-sample-error");
+      if (errEl) errEl.style.display = "none";
+      if (feedback) feedback.textContent = "Acquiring live hardware frame & verifying biometric quality...";
+      btnCaptureSample.disabled = true;
+
+      try {
+        const resp = await fetch(`/api/admin/users/${encodeURIComponent(guidedEnrollUserId)}/face/sample`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+          credentials: "same-origin",
+        });
+
+        const data = await resp.json();
+        btnCaptureSample.disabled = false;
+
+        if (!resp.ok) {
+          if (errEl) {
+            errEl.textContent = data.details || data.error || "Sample quality check failed.";
+            errEl.style.display = "block";
+          }
+          if (feedback) feedback.textContent = "Sample rejected. Ensure face is centered, well-lit, and in focus.";
+          return;
+        }
+
+        guidedEnrollSamplesCount = data.sample_count || (guidedEnrollSamplesCount + 1);
+
+        // Update slot card
+        const slotEl = document.getElementById(`sample-slot-${guidedEnrollSamplesCount}`);
+        if (slotEl) {
+          slotEl.className = "sample-slot-card captured";
+          slotEl.innerHTML = `<span class="slot-num">${guidedEnrollSamplesCount}</span> <span class="slot-stat">VALID ✓</span>`;
+        }
+
+        const countNum = document.getElementById("sample-count-num");
+        if (countNum) countNum.textContent = Math.min(guidedEnrollSamplesCount + 1, 5);
+
+        if (guidedEnrollSamplesCount >= 5) {
+          btnCaptureSample.style.display = "none";
+          const btnFuse = document.getElementById("btn-fuse-and-activate");
+          if (btnFuse) btnFuse.style.display = "inline-block";
+          if (feedback) {
+            feedback.textContent = "✓ 5 valid biometric samples acquired! Click below to fuse 1856-D template and activate account.";
+          }
+        } else {
+          if (feedback) {
+            feedback.textContent = `Sample ${guidedEnrollSamplesCount} of 5 accepted (Blur score: ${Math.round(data.quality?.blur_score || 0)}, Contrast: ${Math.round(data.quality?.contrast || 0)}). Shift angle slightly for next sample.`;
+          }
+        }
+
+      } catch (err) {
+        btnCaptureSample.disabled = false;
+        if (errEl) {
+          errEl.textContent = `Network error: ${err.message}`;
+          errEl.style.display = "block";
+        }
+      }
+    });
+  }
+
+  // Step 3: Fuse and Activate
+  const btnFuseActivate = document.getElementById("btn-fuse-and-activate");
+  if (btnFuseActivate) {
+    btnFuseActivate.addEventListener("click", async () => {
+      if (!guidedEnrollUserId) return;
+      btnFuseActivate.disabled = true;
+      btnFuseActivate.textContent = "FUSING TEMPLATE...";
+
+      try {
+        const resp = await fetch(`/api/admin/users/${encodeURIComponent(guidedEnrollUserId)}/face/enroll-multi`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+          credentials: "same-origin",
+        });
+
+        const data = await resp.json();
+        btnFuseActivate.disabled = false;
+
+        if (!resp.ok) {
+          alert(`Fusion failed: ${data.details || data.error || 'Biometric template fusion error'}`);
+          btnFuseActivate.textContent = "FUSE TEMPLATE & ACTIVATE →";
+          return;
+        }
+
+        // Advance to Step 4
+        const finalDisplay = document.getElementById("final-user-display");
+        if (finalDisplay) finalDisplay.textContent = guidedEnrollUserName || "User";
+
+        document.getElementById("add-step-3-pane").style.display = "none";
+        document.getElementById("add-step-4-pane").style.display = "block";
+        _updateStepIndicator(4);
+
+      } catch (err) {
+        btnFuseActivate.disabled = false;
+        btnFuseActivate.textContent = "FUSE TEMPLATE & ACTIVATE →";
+        alert(`Network error: ${err.message}`);
+      }
+    });
+  }
+
+  // Step 4: Finish Enrollment
+  const btnFinishEnrollment = document.getElementById("btn-finish-enrollment");
+  if (btnFinishEnrollment) {
+    btnFinishEnrollment.addEventListener("click", () => {
+      modalAddUser.style.display = "none";
+      pollDashboard();
+    });
+  }
+
+  // Reset samples button
+  const btnResetSamples = document.getElementById("btn-reset-samples");
+  if (btnResetSamples) {
+    btnResetSamples.addEventListener("click", () => {
+      guidedEnrollSamplesCount = 0;
+      for (let i = 1; i <= 5; i++) {
+        const slot = document.getElementById(`sample-slot-${i}`);
+        if (slot) {
+          slot.className = "sample-slot-card";
+          slot.innerHTML = `<span class="slot-num">${i}</span> <span class="slot-stat">EMPTY</span>`;
+        }
+      }
+      const btnCap = document.getElementById("btn-capture-sample");
+      const btnFuse = document.getElementById("btn-fuse-and-activate");
+      const countNum = document.getElementById("sample-count-num");
+      const feedback = document.getElementById("enroll-sample-feedback");
+      if (btnCap) {
+        btnCap.style.display = "inline-block";
+        btnCap.disabled = false;
+      }
+      if (btnFuse) btnFuse.style.display = "none";
+      if (countNum) countNum.textContent = "1";
+      if (feedback) feedback.textContent = "Samples reset. Face camera directly.";
     });
   }
 
   if (btnCloseAddUser) btnCloseAddUser.addEventListener("click", () => { modalAddUser.style.display = "none"; });
   if (btnCancelAddUser) btnCancelAddUser.addEventListener("click", () => { modalAddUser.style.display = "none"; });
+
+  // =========================================================================
+  // ADMIN RE-AUTHENTICATION MODAL FOR SENSITIVE ACTIONS
+  // =========================================================================
+  let pendingReauthAction = null;
+  const modalAdminReauth = document.getElementById("modal-admin-reauth");
+  const formAdminReauth = document.getElementById("form-admin-reauth");
+  const inputReauthPass = document.getElementById("reauth-password");
+  const elReauthError = document.getElementById("reauth-error");
+  const btnCloseReauth = document.getElementById("btn-close-reauth");
+  const btnCancelReauth = document.getElementById("btn-cancel-reauth");
+
+  function triggerAdminReauth(onSuccessCallback, actionDescription) {
+    pendingReauthAction = onSuccessCallback;
+    if (inputReauthPass) inputReauthPass.value = "";
+    if (elReauthError) elReauthError.style.display = "none";
+    if (modalAdminReauth) modalAdminReauth.style.display = "flex";
+  }
+
+  if (formAdminReauth) {
+    formAdminReauth.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (elReauthError) elReauthError.style.display = "none";
+
+      const password = inputReauthPass ? inputReauthPass.value : "";
+      try {
+        const resp = await fetch("/api/auth/reauthenticate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+          credentials: "same-origin",
+        });
+
+        const data = await resp.json();
+        if (!resp.ok) {
+          elReauthError.textContent = data.details || data.error || "Re-authentication failed.";
+          elReauthError.style.display = "block";
+          return;
+        }
+
+        if (modalAdminReauth) modalAdminReauth.style.display = "none";
+        if (typeof pendingReauthAction === "function") {
+          const action = pendingReauthAction;
+          pendingReauthAction = null;
+          await action();
+        }
+
+      } catch (err) {
+        if (elReauthError) {
+          elReauthError.textContent = `Network error: ${err.message}`;
+          elReauthError.style.display = "block";
+        }
+      }
+    });
+  }
+
+  if (btnCloseReauth) btnCloseReauth.addEventListener("click", () => {
+    if (modalAdminReauth) modalAdminReauth.style.display = "none";
+    pendingReauthAction = null;
+  });
+  if (btnCancelReauth) btnCancelReauth.addEventListener("click", () => {
+    if (modalAdminReauth) modalAdminReauth.style.display = "none";
+    pendingReauthAction = null;
+  });
+
+  // =========================================================================
+  // ADMIN PROFILE UPDATE MODAL
+  // =========================================================================
+  const modalAdminProfile = document.getElementById("modal-admin-profile");
+  const formAdminProfile = document.getElementById("form-admin-profile");
+  const inputAdminNewName = document.getElementById("admin-new-display-name");
+  const elAdminProfileError = document.getElementById("admin-profile-error");
+  const btnCloseAdminProfile = document.getElementById("btn-close-admin-profile");
+  const btnCancelAdminProfile = document.getElementById("btn-cancel-admin-profile");
+  const btnEditAdminProfile = document.getElementById("btn-edit-admin-profile");
+
+  if (btnEditAdminProfile) {
+    btnEditAdminProfile.addEventListener("click", () => {
+      if (inputAdminNewName) {
+        inputAdminNewName.value = currentUser?.display_name || currentUser?.username || "";
+      }
+      if (elAdminProfileError) elAdminProfileError.style.display = "none";
+      if (modalAdminProfile) modalAdminProfile.style.display = "flex";
+    });
+  }
+
+  if (formAdminProfile) {
+    formAdminProfile.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (elAdminProfileError) elAdminProfileError.style.display = "none";
+
+      const newName = inputAdminNewName.value.trim();
+      if (!newName) return;
+
+      try {
+        const resp = await fetch("/api/admin/profile", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ display_name: newName }),
+          credentials: "same-origin",
+        });
+
+        const data = await resp.json();
+        if (!resp.ok) {
+          elAdminProfileError.textContent = data.details || data.error || "Failed to update profile name.";
+          elAdminProfileError.style.display = "block";
+          return;
+        }
+
+        if (currentUser) {
+          currentUser.display_name = newName;
+          applyRoleView();
+        }
+        if (modalAdminProfile) modalAdminProfile.style.display = "none";
+        pollDashboard();
+
+      } catch (err) {
+        if (elAdminProfileError) {
+          elAdminProfileError.textContent = `Network error: ${err.message}`;
+          elAdminProfileError.style.display = "block";
+        }
+      }
+    });
+  }
+
+  if (btnCloseAdminProfile) btnCloseAdminProfile.addEventListener("click", () => {
+    if (modalAdminProfile) modalAdminProfile.style.display = "none";
+  });
+  if (btnCancelAdminProfile) btnCancelAdminProfile.addEventListener("click", () => {
+    if (modalAdminProfile) modalAdminProfile.style.display = "none";
+  });
+
+  // =========================================================================
+  // ACTIVITY FEED TABLE VS TIMELINE TOGGLE
+  // =========================================================================
+  const btnViewTable = document.getElementById("btn-view-table");
+  const btnViewTimeline = document.getElementById("btn-view-timeline");
+  const elEventsTableView = document.getElementById("events-table-view");
+  const elEventsTimelineView = document.getElementById("events-timeline-view");
+
+  if (btnViewTable && btnViewTimeline) {
+    btnViewTable.addEventListener("click", () => {
+      btnViewTable.className = "btn btn-xs btn-toggle active";
+      btnViewTimeline.className = "btn btn-xs btn-toggle";
+      if (elEventsTableView) elEventsTableView.style.display = "table";
+      if (elEventsTimelineView) elEventsTimelineView.style.display = "none";
+    });
+
+    btnViewTimeline.addEventListener("click", () => {
+      btnViewTimeline.className = "btn btn-xs btn-toggle active";
+      btnViewTable.className = "btn btn-xs btn-toggle";
+      if (elEventsTableView) elEventsTableView.style.display = "none";
+      if (elEventsTimelineView) elEventsTimelineView.style.display = "flex";
+    });
+  }
+
+  // =========================================================================
+  // CONVERSATIONAL ATLAS INTELLIGENCE CHAT CLIENT
+  // =========================================================================
+  async function handleChatSubmit(promptText, containerId, inputEl, sendBtn) {
+    const text = (promptText || (inputEl ? inputEl.value : "")).trim();
+    if (!text) return;
+
+    if (inputEl) inputEl.value = "";
+    if (sendBtn) sendBtn.disabled = true;
+
+    const messagesContainer = document.getElementById(containerId);
+    if (!messagesContainer) return;
+
+    // 1. Append User Message
+    const userMsgEl = document.createElement("div");
+    userMsgEl.className = "chat-message chat-message-user";
+    userMsgEl.innerHTML = `
+      <div class="chat-msg-header">
+        <span class="chat-sender">YOU</span>
+        <span style="color: var(--text-dim);">${new Date().toLocaleTimeString()}</span>
+      </div>
+      <div class="chat-msg-body">${escapeHtml(text)}</div>
+    `;
+    messagesContainer.appendChild(userMsgEl);
+
+    // 2. Append Loading Placeholder
+    const loadingEl = document.createElement("div");
+    loadingEl.className = "chat-message chat-message-assistant";
+    loadingEl.id = `chat-loading-${Date.now()}`;
+    loadingEl.innerHTML = `
+      <div class="chat-msg-header">
+        <span class="chat-sender">ATLAS INTELLIGENCE</span>
+        <span class="badge badge-loading" style="font-size: 9px;">REASONING...</span>
+      </div>
+      <div class="chat-msg-body" style="color: var(--text-dim); font-style: italic;">
+        Querying real-time perception state &amp; authoritative database records...
+      </div>
+    `;
+    messagesContainer.appendChild(loadingEl);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    try {
+      const resp = await fetch("/api/assistant/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+        credentials: "same-origin",
+      });
+
+      const data = await resp.json();
+      loadingEl.remove();
+
+      if (!resp.ok) {
+        const errEl = document.createElement("div");
+        errEl.className = "chat-message chat-message-assistant";
+        errEl.innerHTML = `
+          <div class="chat-msg-header">
+            <span class="chat-sender">ATLAS INTELLIGENCE</span>
+            <span class="badge badge-disconnected" style="font-size: 9px;">ERROR</span>
+          </div>
+          <div class="chat-msg-body text-red">${escapeHtml(data.details || data.error || 'Failed to process grounded query.')}</div>
+        `;
+        messagesContainer.appendChild(errEl);
+        return;
+      }
+
+      // 3. Render Grounded Assistant Response
+      const isGrounded = data.confidence_status === "GROUNDED_IN_EVIDENCE";
+      const isUnavail = data.confidence_status === "VISUAL_VERIFICATION_UNAVAILABLE";
+      const statusBadgeClass = isGrounded ? "badge-live" : (isUnavail ? "badge-stale" : "badge-subtle");
+
+      const citationsHtml = (data.citations && data.citations.length > 0)
+        ? `<div class="chat-citations-wrap">${data.citations.map(c => `<span class="chat-cite-pill">${escapeHtml(c)}</span>`).join("")}</div>`
+        : '';
+
+      const traceHtml = data.why_atlas_said_this
+        ? `<details class="chat-traceability">
+            <summary>Why ATLAS said this (Technical Traceability)</summary>
+            <div class="chat-trace-content">${escapeHtml(data.why_atlas_said_this)}</div>
+           </details>`
+        : '';
+
+      const assistantMsgEl = document.createElement("div");
+      assistantMsgEl.className = "chat-message chat-message-assistant";
+      assistantMsgEl.innerHTML = `
+        <div class="chat-msg-header">
+          <span class="chat-sender">ATLAS INTELLIGENCE</span>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <span class="badge ${statusBadgeClass}" style="font-size: 9px;">${escapeHtml(data.confidence_status || "GROUNDED")}</span>
+            <span style="color: var(--text-dim);">${new Date().toLocaleTimeString()}</span>
+          </div>
+        </div>
+        <div class="chat-msg-body">${escapeHtml(data.answer)}</div>
+        ${citationsHtml}
+        ${traceHtml}
+      `;
+      messagesContainer.appendChild(assistantMsgEl);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    } catch (err) {
+      loadingEl.remove();
+      const netErrEl = document.createElement("div");
+      netErrEl.className = "chat-message chat-message-assistant";
+      netErrEl.innerHTML = `
+        <div class="chat-msg-header">
+          <span class="chat-sender">ATLAS INTELLIGENCE</span>
+          <span class="badge badge-disconnected" style="font-size: 9px;">NETWORK ERROR</span>
+        </div>
+        <div class="chat-msg-body text-red">Communication with ATLAS Chat Service failed: ${escapeHtml(err.message)}</div>
+      `;
+      messagesContainer.appendChild(netErrEl);
+    } finally {
+      if (sendBtn) sendBtn.disabled = false;
+      if (inputEl) inputEl.focus();
+    }
+  }
+
+  // Admin Chat Form Submit
+  const adminChatForm = document.getElementById("admin-chat-form");
+  const adminChatInput = document.getElementById("admin-chat-input");
+  const btnAdminChatSend = document.getElementById("btn-admin-chat-send");
+
+  if (adminChatForm) {
+    adminChatForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      handleChatSubmit(null, "admin-chat-messages", adminChatInput, btnAdminChatSend);
+    });
+  }
+
+  // Authorized User Chat Form Submit
+  const authChatForm = document.getElementById("auth-chat-form");
+  const authChatInput = document.getElementById("auth-chat-input");
+  const btnAuthChatSend = document.getElementById("btn-auth-chat-send");
+
+  if (authChatForm) {
+    authChatForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      handleChatSubmit(null, "auth-chat-messages", authChatInput, btnAuthChatSend);
+    });
+  }
+
+  // Quick Query Chips (Admin & Authorized User)
+  document.addEventListener("click", (e) => {
+    const chip = e.target.closest("button[data-chat-prompt]");
+    if (!chip) return;
+    const prompt = chip.dataset.chatPrompt;
+    if (!prompt) return;
+
+    if (currentUser?.role === "ADMIN") {
+      handleChatSubmit(prompt, "admin-chat-messages", adminChatInput, btnAdminChatSend);
+    } else {
+      handleChatSubmit(prompt, "auth-chat-messages", authChatInput, btnAuthChatSend);
+    }
+  });
 
   // Edit User Form Submit
   if (formEditUser) {
@@ -1395,10 +2547,6 @@
     });
   }
 
-  if (btnCloseEditUser) btnCloseEditUser.addEventListener("click", () => { modalEditUser.style.display = "none"; });
-  if (btnCancelEditUser) btnCancelEditUser.addEventListener("click", () => { modalEditUser.style.display = "none"; });
-
-
   // =========================================================================
   // AUTHORIZED USER DASHBOARD INTERACTIONS & ALERT GATING
   // =========================================================================
@@ -1417,7 +2565,7 @@
           authModalAlertSev.textContent = `${alertObj.severity} SEVERITY`;
           authModalAlertStatus.textContent = alertObj.status;
           authModalAlertSummary.textContent = alertObj.summary;
-          authModalAlertTime.textContent = alertObj.created_at ? alertObj.created_at.replace("T", " ").split(".")[0] : "--";
+          authModalAlertTime.textContent = alertObj.created_at ? formatLocalDateTime(alertObj.created_at) : "--";
           modalAuthAlert.style.display = "flex";
         }
       } else if (action === "auth-view-evidence") {
@@ -1534,7 +2682,7 @@
       } else {
         invTimelineContainer.innerHTML = timeline.map(item => `
           <div class="inv-timeline-item">
-            <span class="inv-item-time">${escapeHtml(item.timestamp ? item.timestamp.split('T')[1]?.split('.')[0] : '--')}</span>
+            <span class="inv-item-time">${escapeHtml(item.timestamp ? formatLocalTime(item.timestamp) : '--')}</span>
             <div>
               <strong>${escapeHtml(item.type)}</strong>
               <p style="font-size: 11px; color: var(--text-muted);">${escapeHtml(item.description || item.details || '')}</p>
@@ -1555,7 +2703,7 @@
               <strong>${escapeHtml(o.event_type || o.type)}</strong>
               <span class="badge badge-subtle">#${escapeHtml(o.track_id !== undefined ? o.track_id : '')}</span>
             </div>
-            <div style="font-size: 10px; color: var(--text-dim);">${escapeHtml(o.timestamp ? o.timestamp.split('T')[1]?.split('.')[0] : '')}</div>
+            <div style="font-size: 10px; color: var(--text-dim);">${escapeHtml(o.timestamp ? formatLocalTime(o.timestamp) : '')}</div>
           </div>
         `).join("");
       }
@@ -1570,10 +2718,10 @@
         invCameraArtifactContainer.style.display = "block";
 
         if (invCamProvenance) invCamProvenance.textContent = evArtifact.temporal_relation || "CAPTURED_AFTER_EVENT";
-        if (invCamCaptured) invCamCaptured.textContent = evArtifact.captured_at || "--";
+        if (invCamCaptured) invCamCaptured.textContent = formatLocalDateTime(evArtifact.captured_at);
         if (invCamSourceEvent) invCamSourceEvent.textContent = evArtifact.source_event_id || "--";
-        if (invCamEventTime) invCamEventTime.textContent = evArtifact.source_event_timestamp || "--";
-        if (invCamFrameTime) invCamFrameTime.textContent = evArtifact.source_frame_timestamp || "--";
+        if (invCamEventTime) invCamEventTime.textContent = formatLocalDateTime(evArtifact.source_event_timestamp);
+        if (invCamFrameTime) invCamFrameTime.textContent = formatLocalDateTime(evArtifact.source_frame_timestamp);
         if (invCamEvidenceId) invCamEvidenceId.textContent = evArtifact.evidence_id || "--";
         if (invCamIntegrity) invCamIntegrity.textContent = "INTEGRITY VERIFIED";
         if (invCamDimensions) invCamDimensions.textContent = `${evArtifact.width || '--'}x${evArtifact.height || '--'}`;

@@ -46,6 +46,7 @@
           <div id="user-logged-in" class="user-profile-widget" style="display: none;">
             <span class="user-role-tag" id="user-role-badge">ADMIN</span>
             <span class="user-name-tag" id="user-display-name">Administrator</span>
+            <button id="btn-edit-admin-profile" class="btn btn-outline btn-xs" type="button" title="Edit Admin Display Name" style="display: none; padding: 2px 6px; font-size: 10px; margin-right: 4px;">✎</button>
             <button id="btn-logout" class="btn btn-outline-danger btn-xs" type="button">LOGOUT</button>
           </div>
           <div id="user-logged-out" class="user-login-prompt">
@@ -139,19 +140,31 @@
           </div>
         </section>
 
-        <!-- Section B: Live -->
+        <!-- Section B: Live Camera Feed & Controls -->
         <section class="card section-live">
-          <div class="card-header">
-            <h2>B. LIVE CAMERA FEED</h2>
-            <span class="source-tag" id="camera-source-label">Camera: /dev/video0</span>
+          <div class="card-header live-cam-card-header">
+            <div class="live-cam-header-title">
+              <h2>LIVE CAMERA</h2>
+              <span class="status-pill status-starting" id="live-cam-status-pill">
+                <span class="status-dot"></span>
+                <span id="live-cam-status-text">CONNECTING</span>
+              </span>
+            </div>
+            <div class="live-cam-header-controls">
+              <span class="source-tag" id="camera-source-label">Camera: Device 0</span>
+              <button id="btn-camera-toggle" class="btn btn-sm btn-outline-danger" type="button">
+                TURN CAMERA OFF
+              </button>
+            </div>
           </div>
-          <div class="video-container">
-            <img id="camera-feed" src="/api/camera/video_feed" alt="Real Camera Feed" />
-            <div id="video-overlay" class="video-overlay hidden">
+          <div class="video-container" id="video-feed-container">
+            <img id="camera-feed" alt="Real Camera Feed" />
+            <div id="video-overlay" class="video-overlay">
               <div class="overlay-content">
-                <div class="overlay-icon">⚠️</div>
-                <h3 id="overlay-title">CAMERA DISCONNECTED</h3>
-                <p id="overlay-msg">No physical video frame received.</p>
+                <div class="overlay-icon" id="overlay-icon">⏳</div>
+                <h3 id="overlay-title">CONNECTING</h3>
+                <p id="overlay-msg">Acquiring authoritative video stream...</p>
+                <button id="btn-retry-stream" class="btn btn-sm btn-primary" type="button" style="display: none; margin-top: 12px;">RETRY STREAM</button>
               </div>
             </div>
           </div>
@@ -162,7 +175,7 @@
             </div>
             <div class="metric-pill">
               <span class="metric-label">RESOLUTION</span>
-              <span class="metric-val" id="metric-resolution">640x480</span>
+              <span class="metric-val" id="metric-resolution">--</span>
             </div>
             <div class="metric-pill">
               <span class="metric-label">PERSONS IN VIEW</span>
@@ -172,9 +185,55 @@
               <span class="metric-label">OBJECTS IN VIEW</span>
               <span class="metric-val" id="metric-objects-count">0</span>
             </div>
+            <div class="metric-pill">
+              <span class="metric-label">LAST FRAME</span>
+              <span class="metric-val" id="metric-last-frame">--</span>
+            </div>
           </div>
         </section>
       </div>
+
+      <!-- Conversational ATLAS Intelligence Assistant (Admin) -->
+      <section class="card section-chat" id="admin-chat-card" style="margin-bottom: 20px;">
+        <div class="card-header chat-header">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.2rem;">💬</span>
+            <div>
+              <h2>CONVERSATIONAL ATLAS INTELLIGENCE</h2>
+              <span class="subtitle-text">Grounded real-time query interface with cryptographic citations &amp; fail-closed reasoning</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <span class="badge badge-live" id="admin-chat-llm-badge">LLM: qwen2.5:3b (GROUNDED)</span>
+            <span class="badge badge-subtle">FAIL-CLOSED</span>
+          </div>
+        </div>
+        <div class="card-body chat-card-body">
+          <div class="chat-quick-queries">
+            <span class="quick-label">QUICK QUERIES:</span>
+            <button type="button" class="btn btn-xs btn-chip" data-chat-prompt="Who is currently inside?">Who is currently inside?</button>
+            <button type="button" class="btn btn-xs btn-chip" data-chat-prompt="What do you see right now?">What do you see right now?</button>
+            <button type="button" class="btn btn-xs btn-chip" data-chat-prompt="What happened today?">What happened today?</button>
+            <button type="button" class="btn btn-xs btn-chip" data-chat-prompt="Is the perimeter secure?">Is perimeter secure?</button>
+            <button type="button" class="btn btn-xs btn-chip" data-chat-prompt="Show active security alerts">Show active alerts</button>
+          </div>
+          <div class="chat-messages-container" id="admin-chat-messages">
+            <div class="chat-message chat-message-assistant">
+              <div class="chat-msg-header">
+                <span class="chat-sender">ATLAS INTELLIGENCE</span>
+                <span class="badge badge-live" style="font-size: 9px;">GROUNDED</span>
+              </div>
+              <div class="chat-msg-body">
+                Hello Administrator. I am actively monitoring the home perimeter via physical camera and real-time event pipeline. How can I assist you with safety status or activity history?
+              </div>
+            </div>
+          </div>
+          <form class="chat-input-row" id="admin-chat-form">
+            <input type="text" id="admin-chat-input" class="form-control chat-input" placeholder="Ask ATLAS about observed people, clothing colors, objects, alerts, or audit history..." autocomplete="off" />
+            <button type="submit" class="btn btn-primary" id="btn-admin-chat-send">ASK ATLAS</button>
+          </form>
+        </div>
+      </section>
 
       <!-- Row 2: Section C (People) & Section D (Activity) -->
       <div class="admin-grid-two">
@@ -195,23 +254,33 @@
         <section class="card section-activity">
           <div class="card-header">
             <h2>D. ACTIVITY FEED</h2>
-            <span class="counter-badge" id="events-count-badge">0 RECENT</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <div class="btn-group" id="activity-view-toggle">
+                <button type="button" class="btn btn-xs btn-toggle active" id="btn-view-table">TABLE</button>
+                <button type="button" class="btn btn-xs btn-toggle" id="btn-view-timeline">TIMELINE</button>
+              </div>
+              <span class="counter-badge" id="events-count-badge">0 RECENT</span>
+            </div>
           </div>
           <div class="card-body scrollable-card-body">
-            <table class="events-table">
+            <table class="events-table" id="events-table-view">
               <thead>
                 <tr>
                   <th>TIME</th>
-                  <th>EVENT</th>
-                  <th>TRACK</th>
-                  <th>CONF</th>
+                  <th>WHAT HAPPENED</th>
+                  <th>WHO / OBJECT</th>
+                  <th>ACTIVITY</th>
                   <th>STATUS</th>
+                  <th>TRACE</th>
                 </tr>
               </thead>
               <tbody id="events-tbody">
-                <tr><td colspan="5" class="empty-table">Awaiting events from perception engine...</td></tr>
+                <tr><td colspan="6" class="empty-table">Awaiting events from perception engine...</td></tr>
               </tbody>
             </table>
+            <div id="events-timeline-view" class="events-timeline" style="display: none;">
+              <div class="empty-state">Awaiting timeline events...</div>
+            </div>
           </div>
         </section>
       </div>
@@ -429,6 +498,43 @@
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- Screen 3: Household Safety Assistant -->
+      <section class="card auth-chat-card" style="margin-top: 20px;">
+        <div class="card-header">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.2rem;">💬</span>
+            <div>
+              <h2>HOUSEHOLD SAFETY ASSISTANT</h2>
+              <span class="subtitle-text">Private, grounded home safety intelligence with household permissions</span>
+            </div>
+          </div>
+          <span class="badge auth-user">HOUSEHOLD PERMISSIONS</span>
+        </div>
+        <div class="card-body chat-card-body">
+          <div class="chat-quick-queries">
+            <span class="quick-label">QUICK CHECKS:</span>
+            <button type="button" class="btn btn-xs btn-chip" data-chat-prompt="Is my home secure right now?">Is my home secure right now?</button>
+            <button type="button" class="btn btn-xs btn-chip" data-chat-prompt="Who is currently at home?">Who is currently at home?</button>
+            <button type="button" class="btn btn-xs btn-chip" data-chat-prompt="Are there any active security alerts?">Are there any active alerts?</button>
+          </div>
+          <div class="chat-messages-container" id="auth-chat-messages">
+            <div class="chat-message chat-message-assistant">
+              <div class="chat-msg-header">
+                <span class="chat-sender">ATLAS ASSISTANT</span>
+                <span class="badge auth-user" style="font-size: 9px;">AUTHORIZED</span>
+              </div>
+              <div class="chat-msg-body">
+                Hello! I am ATLAS Home. Your home is under continuous protection. Ask me anytime about safety alerts or current perimeter status.
+              </div>
+            </div>
+          </div>
+          <form class="chat-input-row" id="auth-chat-form">
+            <input type="text" id="auth-chat-input" class="form-control chat-input" placeholder="Ask about home safety or perimeter status..." autocomplete="off" />
+            <button type="submit" class="btn btn-primary" id="btn-auth-chat-send">ASK ATLAS</button>
+          </form>
         </div>
       </section>
 
@@ -777,37 +883,215 @@
     </div>
   </div>
 
-  <!-- Modal: Add User (Admin User Management) -->
+  <!-- Modal: Guided 4-Step Biometric Enrollment (Admin User Management) -->
   <div class="modal-backdrop" id="modal-add-user" style="display: none;">
-    <div class="modal-dialog modal-user-dialog">
-      <div class="modal-header">
-        <h3 id="add-user-modal-title">ADD AUTHORIZED USER</h3>
-        <button class="modal-close" id="btn-close-add-user" type="button">&times;</button>
+    <div class="modal-dialog modal-user-dialog" style="max-width: 580px;">
+      <!-- Step Indicator Header -->
+      <div class="login-stage-bar" id="add-user-stages-bar" style="margin-bottom: 16px;">
+        <div class="stage-step active" id="add-step-pill-1"><span class="step-num">1</span> DETAILS</div>
+        <div class="stage-connector" id="add-step-conn-1"></div>
+        <div class="stage-step" id="add-step-pill-2"><span class="step-num">2</span> DRAFT</div>
+        <div class="stage-connector" id="add-step-conn-2"></div>
+        <div class="stage-step" id="add-step-pill-3"><span class="step-num">3</span> 5 SAMPLES</div>
+        <div class="stage-connector" id="add-step-conn-3"></div>
+        <div class="stage-step" id="add-step-pill-4"><span class="step-num">4</span> ACTIVATED</div>
       </div>
-      <form id="form-add-user" class="user-form">
-        <div class="form-group">
-          <label for="new-username">USERNAME</label>
-          <input type="text" id="new-username" class="form-control" placeholder="e.g. family_member" required />
+
+      <!-- Step 1: User Account Form -->
+      <div id="add-step-1-pane">
+        <div class="modal-header">
+          <div>
+            <h3 id="add-user-modal-title">STEP 1: ACCOUNT DETAILS</h3>
+            <p class="subtitle-text">Authorized User Account Creation (Strict Limit: Max 10 Users)</p>
+          </div>
+          <button class="modal-close" id="btn-close-add-user" type="button">&times;</button>
         </div>
-        <div class="form-group">
-          <label for="new-display-name">DISPLAY NAME</label>
-          <input type="text" id="new-display-name" class="form-control" placeholder="e.g. Sarah Jenkins" required />
+        <form id="form-add-user" class="user-form">
+          <div class="form-group">
+            <label for="new-username">USERNAME *</label>
+            <input type="text" id="new-username" class="form-control" placeholder="e.g. sarah_jenkins" required />
+          </div>
+          <div class="form-group">
+            <label for="new-display-name">REAL DISPLAY NAME *</label>
+            <input type="text" id="new-display-name" class="form-control" placeholder="e.g. Sarah Jenkins" required />
+          </div>
+          <div class="form-group">
+            <label for="new-password">TEMPORARY PASSWORD *</label>
+            <input type="password" id="new-password" class="form-control" placeholder="••••••••" required />
+          </div>
+          <div class="form-group">
+            <label for="new-phone">PHONE NUMBER (OPTIONAL)</label>
+            <input type="text" id="new-phone" class="form-control" placeholder="+1 (555) 019-2834" />
+          </div>
+          <div class="form-group">
+            <label for="new-relationship">RELATIONSHIP *</label>
+            <select id="new-relationship" class="form-control" required>
+              <option value="Family" selected>Family (Household Member)</option>
+              <option value="Friend">Friend</option>
+              <option value="Parent">Parent</option>
+              <option value="Sibling">Sibling</option>
+              <option value="Caregiver">Caregiver</option>
+              <option value="Employee">Employee</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="new-role">ROLE</label>
+            <select id="new-role" class="form-control">
+              <option value="AUTHORIZED_USER" selected>AUTHORIZED USER (Family / Household Member)</option>
+            </select>
+          </div>
+          <div class="form-error" id="add-user-error" style="display: none;"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" id="btn-cancel-add-user">CANCEL</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-add-user">NEXT: CREATE DRAFT →</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Step 2: Draft Created Summary -->
+      <div id="add-step-2-pane" style="display: none;">
+        <div class="modal-header">
+          <div>
+            <h3>STEP 2: ACCOUNT DRAFT CREATED</h3>
+            <p class="subtitle-text">Face enrollment is mandatory before account activation.</p>
+          </div>
         </div>
-        <div class="form-group">
-          <label for="new-password">TEMPORARY PASSWORD</label>
-          <input type="password" id="new-password" class="form-control" placeholder="••••••••" required />
+        <div style="padding: 16px; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span class="badge badge-stale">PENDING_ENROLLMENT</span>
+            <strong id="draft-user-display" style="color: var(--text-main);">User</strong>
+          </div>
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 8px;">
+            Account status is currently <strong>DEACTIVATED</strong>. Under fail-closed security policy, the user cannot log in or be recognized until exactly <strong>5 real biometric samples</strong> are captured from the physical camera and fused into an 1856-D template.
+          </p>
+          <div style="font-family: var(--font-mono); font-size: 11px; color: var(--accent-cyan);">
+            User ID: <span id="draft-user-id">--</span>
+          </div>
         </div>
-        <div class="form-group">
-          <label for="new-role">ROLE</label>
-          <select id="new-role" class="form-control">
-            <option value="AUTHORIZED_USER" selected>AUTHORIZED USER (Family / Household)</option>
-            <option value="ADMIN">ADMINISTRATOR (Full Visibility & Control)</option>
-          </select>
-        </div>
-        <div class="form-error" id="add-user-error" style="display: none;"></div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-outline" id="btn-cancel-add-user">CANCEL</button>
-          <button type="submit" class="btn btn-primary" id="btn-submit-add-user">CREATE USER</button>
+          <button type="button" class="btn btn-outline" id="btn-cancel-draft">CANCEL</button>
+          <button type="button" class="btn btn-primary" id="btn-start-biometrics">START BIOMETRIC ENROLLMENT →</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Multi-Sample Biometric Camera Capture -->
+      <div id="add-step-3-pane" style="display: none;">
+        <div class="modal-header">
+          <div>
+            <h3>STEP 3: 5 REAL CAMERA SAMPLES</h3>
+            <p class="subtitle-text">Position user's face within the reticle for 5 distinct angles/frames.</p>
+          </div>
+        </div>
+        <div class="face-verify-body" style="padding: 0 0 16px 0;">
+          <!-- Camera Feed Viewport -->
+          <div class="face-camera-container" style="max-height: 240px;">
+            <img id="enroll-video-preview" src="/api/camera/video_feed" alt="Webcam Preview" class="face-camera-img" />
+            <div class="face-scan-overlay">
+              <div class="scan-reticle">
+                <div class="reticle-corner tl"></div>
+                <div class="reticle-corner tr"></div>
+                <div class="reticle-corner bl"></div>
+                <div class="reticle-corner br"></div>
+                <div class="reticle-guide"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5 Samples Progress Grid -->
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 12px 0;">
+            <div class="sample-slot-card" id="sample-slot-1"><span class="slot-num">1</span> <span class="slot-stat">EMPTY</span></div>
+            <div class="sample-slot-card" id="sample-slot-2"><span class="slot-num">2</span> <span class="slot-stat">EMPTY</span></div>
+            <div class="sample-slot-card" id="sample-slot-3"><span class="slot-num">3</span> <span class="slot-stat">EMPTY</span></div>
+            <div class="sample-slot-card" id="sample-slot-4"><span class="slot-num">4</span> <span class="slot-stat">EMPTY</span></div>
+            <div class="sample-slot-card" id="sample-slot-5"><span class="slot-num">5</span> <span class="slot-stat">EMPTY</span></div>
+          </div>
+
+          <div class="face-status-text" id="enroll-sample-feedback" style="margin-bottom: 8px;">
+            Sample progress: 0 of 5 captured. Face camera directly.
+          </div>
+          <div class="form-error" id="enroll-sample-error" style="display: none;"></div>
+
+          <div style="display: flex; gap: 8px; justify-content: flex-end;">
+            <button type="button" class="btn btn-outline" id="btn-reset-samples">RESET SAMPLES</button>
+            <button type="button" class="btn btn-primary" id="btn-capture-sample">CAPTURE SAMPLE (<span id="sample-count-num">1</span>/5)</button>
+            <button type="button" class="btn btn-success" id="btn-fuse-and-activate" style="display: none;">FUSE TEMPLATE &amp; ACTIVATE →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4: Verification & Activation Complete -->
+      <div id="add-step-4-pane" style="display: none;">
+        <div class="modal-header">
+          <div>
+            <h3 style="color: #10b981;">STEP 4: ENROLLMENT VERIFIED &amp; ACTIVATED ✓</h3>
+            <p class="subtitle-text">Multi-sample fusion complete. 1856-D biometric key stored in secure vault.</p>
+          </div>
+        </div>
+        <div style="padding: 16px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span class="badge badge-live">ACCOUNT ACTIVE</span>
+            <span class="badge badge-live">ENROLLED</span>
+            <strong id="final-user-display" style="color: var(--text-main);">User</strong>
+          </div>
+          <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+            5 real optical samples were validated for blur, contrast, and liveness variance. Normalized 1856-D biometric vector successfully fused and activated.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary" id="btn-finish-enrollment">DONE (VIEW USER SLOTS)</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Modal: Admin Re-Authentication for Sensitive Actions -->
+  <div class="modal-backdrop" id="modal-admin-reauth" style="display: none;">
+    <div class="modal-dialog modal-user-dialog" style="max-width: 480px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem;">🔒</span>
+          <div>
+            <h3>ADMIN RE-AUTHENTICATION</h3>
+            <p class="subtitle-text">Sensitive action requires Admin password and live camera face check</p>
+          </div>
+        </div>
+        <button class="modal-close" id="btn-close-reauth" type="button">&times;</button>
+      </div>
+      <form id="form-admin-reauth" class="user-form">
+        <div class="form-group">
+          <label for="reauth-password">ADMIN PASSWORD *</label>
+          <input type="password" id="reauth-password" class="form-control" placeholder="••••••••" required />
+        </div>
+        <div style="margin-bottom: 12px; font-size: 12px; color: var(--text-muted);">
+          📷 Live webcam snapshot will be captured simultaneously to verify physical presence.
+        </div>
+        <div class="form-error" id="reauth-error" style="display: none;"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-reauth">CANCEL</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-reauth">CONFIRM &amp; PROCEED</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Edit Admin Display Name -->
+  <div class="modal-backdrop" id="modal-admin-profile" style="display: none;">
+    <div class="modal-dialog modal-user-dialog" style="max-width: 460px;">
+      <div class="modal-header">
+        <h3>UPDATE ADMIN DISPLAY NAME</h3>
+        <button class="modal-close" id="btn-close-admin-profile" type="button">&times;</button>
+      </div>
+      <form id="form-admin-profile" class="user-form">
+        <div class="form-group">
+          <label for="admin-new-display-name">ADMIN DISPLAY NAME *</label>
+          <input type="text" id="admin-new-display-name" class="form-control" placeholder="e.g. Priya" required />
+        </div>
+        <div class="form-error" id="admin-profile-error" style="display: none;"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-admin-profile">CANCEL</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-admin-profile">UPDATE NAME</button>
         </div>
       </form>
     </div>
@@ -815,7 +1099,7 @@
 
   <!-- Modal: Edit User (Admin User Management) -->
   <div class="modal-backdrop" id="modal-edit-user" style="display: none;">
-    <div class="modal-dialog modal-user-dialog">
+    <div class="modal-dialog modal-user-dialog" style="max-width: 500px;">
       <div class="modal-header">
         <h3>EDIT USER DETAILS</h3>
         <button class="modal-close" id="btn-close-edit-user" type="button">&times;</button>
@@ -823,26 +1107,35 @@
       <form id="form-edit-user" class="user-form">
         <input type="hidden" id="edit-user-id" />
         <div class="form-group">
-          <label>USERNAME</label>
-          <input type="text" id="edit-username" class="form-control" readonly disabled />
+          <label for="edit-username">USERNAME *</label>
+          <input type="text" id="edit-username" class="form-control" required />
         </div>
         <div class="form-group">
-          <label for="edit-display-name">DISPLAY NAME</label>
+          <label for="edit-display-name">REAL DISPLAY NAME *</label>
           <input type="text" id="edit-display-name" class="form-control" required />
         </div>
         <div class="form-group">
-          <label for="edit-role">ROLE</label>
-          <select id="edit-role" class="form-control">
-            <option value="AUTHORIZED_USER">AUTHORIZED USER</option>
-            <option value="ADMIN">ADMINISTRATOR</option>
+          <label for="edit-relationship">RELATIONSHIP *</label>
+          <select id="edit-relationship" class="form-control" required>
+            <option value="Family">Family (Household Member)</option>
+            <option value="Friend">Friend</option>
+            <option value="Parent">Parent</option>
+            <option value="Sibling">Sibling</option>
+            <option value="Caregiver">Caregiver</option>
+            <option value="Employee">Employee</option>
+            <option value="Other">Other</option>
           </select>
+        </div>
+        <div class="form-group">
+          <label for="edit-phone">PHONE NUMBER (OPTIONAL)</label>
+          <input type="text" id="edit-phone" class="form-control" placeholder="+1 (555) 019-2834" />
         </div>
         <div class="form-group">
           <label for="edit-password">RESET PASSWORD (OPTIONAL)</label>
           <input type="password" id="edit-password" class="form-control" placeholder="Leave blank to keep current password" />
         </div>
         <div class="form-group checkbox-group">
-          <label>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
             <input type="checkbox" id="edit-is-active" /> ACCOUNT ACTIVE
           </label>
         </div>
@@ -852,6 +1145,73 @@
           <button type="submit" class="btn btn-primary" id="btn-submit-edit-user">SAVE CHANGES</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Modal: Remove User Confirmation -->
+  <div class="modal-backdrop" id="modal-remove-user" style="display: none;">
+    <div class="modal-dialog modal-user-dialog" style="max-width: 480px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem; color: #ef4444;">⚠️</span>
+          <div>
+            <h3>REMOVE AUTHORIZED USER</h3>
+            <p class="subtitle-text">Permanent identity and biometric deletion</p>
+          </div>
+        </div>
+        <button class="modal-close" id="btn-close-remove-user" type="button">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 16px;">
+        <input type="hidden" id="remove-user-id" />
+        <p style="font-size: 13px; color: var(--text-main); margin-bottom: 12px;">
+          Are you sure you want to permanently remove <strong id="remove-user-name" style="color: #f87171;">--</strong> (<span id="remove-user-handle" style="font-family: var(--font-mono); color: var(--accent-cyan);">@--</span>)?
+        </p>
+        <div style="padding: 12px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+          • Biometric templates (1856-D vectors) will be purged from the secure vault.<br/>
+          • All active user sessions and authentication tokens will be immediately invalidated.<br/>
+          • This action is recorded in the immutable security audit trail.
+        </div>
+        <div class="form-error" id="remove-user-error" style="display: none; margin-top: 12px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" id="btn-cancel-remove-user">CANCEL</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-remove-user">CONFIRM REMOVE USER</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Manage Biometric Face -->
+  <div class="modal-backdrop" id="modal-manage-face" style="display: none;">
+    <div class="modal-dialog modal-user-dialog" style="max-width: 500px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem;">👤</span>
+          <div>
+            <h3>BIOMETRIC FACE MANAGEMENT</h3>
+            <p class="subtitle-text">Manage optical facial recognition template</p>
+          </div>
+        </div>
+        <button class="modal-close" id="btn-close-manage-face" type="button">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 16px;">
+        <input type="hidden" id="face-mgmt-user-id" />
+        <div style="margin-bottom: 14px;">
+          <strong id="face-mgmt-user-name" style="color: var(--text-main); font-size: 14px;">--</strong>
+          <span id="face-mgmt-user-handle" style="font-family: var(--font-mono); color: var(--accent-cyan); font-size: 12px; margin-left: 6px;">@--</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+          <span class="field-label">CURRENT TEMPLATE:</span>
+          <span class="badge" id="face-mgmt-status-badge">--</span>
+        </div>
+        <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 16px;">
+          Replacing face will launch the 5-sample optical capture wizard. Removing face will clear the 1856-D biometric template, automatically deactivate the account under fail-closed security, and invalidate all active user sessions.
+        </p>
+        <div class="form-error" id="face-mgmt-error" style="display: none; margin-bottom: 12px;"></div>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+          <button type="button" class="btn btn-outline-danger" id="btn-action-remove-face">REMOVE FACE</button>
+          <button type="button" class="btn btn-primary" id="btn-action-replace-face">REPLACE FACE →</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -922,6 +1282,35 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" id="btn-close-auth-live-footer" type="button">CLOSE STREAM</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Camera OFF Confirmation (Admin) -->
+  <div class="modal-backdrop" id="modal-camera-confirm" style="display: none;">
+    <div class="modal-dialog modal-user-dialog" style="max-width: 540px;">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">⚠️</span>
+          <h3 style="margin: 0; color: #ef4444; font-size: 1.05rem; font-weight: 700; letter-spacing: 0.05em;">TURN OFF HOME SURVEILLANCE?</h3>
+        </div>
+        <button class="modal-close" id="btn-close-camera-confirm" type="button">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        <p style="margin-bottom: 12px; font-weight: 600; color: var(--text-primary);">This will immediately stop:</p>
+        <ul style="margin: 0 0 16px 20px; padding: 0; color: var(--text-secondary); line-height: 1.6;">
+          <li>Live camera monitoring &amp; hardware stream</li>
+          <li>Perception processing (person &amp; object tracking)</li>
+          <li>Camera-derived safety event generation</li>
+          <li>Camera-derived evidence snapshot capture</li>
+        </ul>
+        <div style="padding: 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 6px; font-size: 0.85rem; color: #fca5a5;">
+          <strong>Security Policy:</strong> Existing active incidents will remain intact and preserved. Biometric logins will be paused until the camera is restarted.
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border-color);">
+        <button class="btn btn-outline" id="btn-cancel-camera-off" type="button">CANCEL</button>
+        <button class="btn btn-danger" id="btn-confirm-camera-off" type="button">TURN CAMERA OFF</button>
       </div>
     </div>
   </div>

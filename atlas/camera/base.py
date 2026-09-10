@@ -14,10 +14,27 @@ class CameraState(str, Enum):
     CONNECTING = "connecting"
     CONNECTED = "connected"
     ERROR = "error"
+    STARTING = "starting"
+    STOPPING = "stopping"
+    OFF = "off"
+    UNAVAILABLE = "unavailable"
 
 
 class BaseCameraStream(ABC):
     """Standardized camera capture interface for ATLAS."""
+
+    @property
+    def is_enabled(self) -> bool:
+        """True if camera surveillance capture is enabled by administrator."""
+        return True
+
+    def enable(self) -> None:
+        """Enable camera surveillance capture."""
+        pass
+
+    def disable(self) -> None:
+        """Disable camera surveillance capture and release hardware resources."""
+        pass
 
     @abstractmethod
     def start(self) -> None:

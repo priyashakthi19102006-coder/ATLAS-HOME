@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -66,7 +66,7 @@ class ActionObservation(BaseModel):
 
 
 class PersonObservation(BaseModel):
-    """Tracked person state and observed actions."""
+    """Tracked person state, verified identity, observed actions, and visual attributes."""
     track_id: int
     class_name: str = "person"
     bbox: BoundingBox
@@ -76,10 +76,17 @@ class PersonObservation(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
     first_seen: float
     last_seen: float
+    # Real-data identity categorization (Requirement 2 & 9)
+    identity_status: Literal["KNOWN_AUTHORIZED", "UNKNOWN", "NOT_AUTHORIZED"] = "UNKNOWN"
+    person_name: str = "Unknown Person"
+    user_id: Optional[str] = None
+    identity_confidence: float = 0.0
+    # Structured visual attributes from actual frame evidence (Requirement 20 & 79)
+    visual_attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 class ObjectObservation(BaseModel):
-    """Tracked non-person object state and movement."""
+    """Tracked non-person object state, movement, and person association."""
     track_id: int
     class_name: str
     bbox: BoundingBox
@@ -88,6 +95,9 @@ class ObjectObservation(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
     first_seen: float
     last_seen: float
+    approximate_color: Optional[str] = None
+    associated_person_track_id: Optional[int] = None
+    associated_person_name: Optional[str] = None
 
 
 class PerceptionObservation(BaseModel):

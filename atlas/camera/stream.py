@@ -99,6 +99,8 @@ class CameraStream(BaseCameraStream):
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._running = False
+        self._enabled = True
+        self._current_cap: cv2.VideoCapture | None = None
 
         self._latest_frame: np.ndarray | None = None
         self._last_frame_timestamp: float | None = None
@@ -110,6 +112,42 @@ class CameraStream(BaseCameraStream):
 
         if auto_start:
             self.start()
+
+    @property
+    def is_enabled(self) -> bool:
+        with self._lock:
+            return self._enabled
+
+    def enable(self) -> None:
+        """Enable camera surveillance capture and restart hardware acquisition."""
+        with self._lock:
+            if self._enabled:
+                return
+            self._enabled = True
+            self._state = CameraState.CONNECTING
+            self._error_message = None
+        logger.info("[camera] Surveillance camera enabled by administrator.")
+
+    def disable(self) -> None:
+        """Disable camera surveillance capture and release hardware resources immediately."""
+        cap_to_release = None
+        with self._lock:
+            if not self._enabled:
+                return
+            self._enabled = False
+            self._state = CameraState.OFF
+            self._latest_frame = None
+            self._last_frame_timestamp = None
+            self._fps = 0.0
+            cap_to_release = self._current_cap
+            self._current_cap = None
+
+        if cap_to_release is not None:
+            try:
+                cap_to_release.release()
+            except Exception as e:
+                logger.warning(f"[camera] Error releasing capture on disable: {e}")
+        logger.info("[camera] Surveillance camera disabled and hardware released by administrator.")
 
     def start(self) -> None:
         """Start the background frame capture worker thread."""
@@ -277,25 +315,34 @@ class CameraStream(BaseCameraStream):
     def _capture_worker(self) -> None:
         """Continuous frame grabber running in background thread."""
         while self._running:
+            if not self._enabled:
+                with self._lock:
+                    self._state = CameraState.OFF
+                time.sleep(0.2)
+                continue
+
             cap = self._open_capture()
             if cap is None:
                 sleep_end = time.time() + self.retry_interval
-                while self._running and time.time() < sleep_end:
+                while self._running and self._enabled and time.time() < sleep_end:
                     time.sleep(0.2)
                 continue
 
             with self._lock:
+                self._current_cap = cap
                 self._state = CameraState.CONNECTED
                 self._error_message = None
                 self._last_fps_calc_time = time.time()
                 self._fps_counter = 0
 
             try:
-                while self._running:
+                while self._running and self._enabled:
                     ret, frame = cap.read()
                     now = time.time()
 
                     if not ret or frame is None or frame.size == 0:
+                        if not self._enabled:
+                            break
                         err = f"Lost frame from camera stream ({self._active_source}). Stream interrupted."
                         logger.warning(f"[camera] {err}")
                         with self._lock:
@@ -329,30 +376,33 @@ class CameraStream(BaseCameraStream):
                     self._error_message = err
                     self._latest_frame = None
             finally:
+                with self._lock:
+                    if self._current_cap is cap:
+                        self._current_cap = None
                 try:
                     cap.release()
                 except Exception:
                     pass
 
-            if self._running:
+            if self._running and self._enabled:
                 logger.info(f"[camera] Will retry candidate connections in {self.retry_interval}s...")
                 time.sleep(self.retry_interval)
 
     def get_latest_frame(self) -> Tuple[np.ndarray, float] | None:
         """Return a copy of the latest acquired real frame and timestamp.
         
-        Strict Real Data Policy: Returns None if no real frame is available.
+        Strict Real Data Policy: Returns None if no real frame is available or camera is disabled.
         Never generates fake or mock frames.
         """
         with self._lock:
-            if self._latest_frame is None or self._last_frame_timestamp is None:
+            if not self._enabled or self._latest_frame is None or self._last_frame_timestamp is None:
                 return None
             return self._latest_frame.copy(), self._last_frame_timestamp
 
     @property
     def is_connected(self) -> bool:
         with self._lock:
-            return self._state == CameraState.CONNECTED and self._latest_frame is not None
+            return self._enabled and self._state == CameraState.CONNECTED and self._latest_frame is not None
 
     @property
     def connection_state(self) -> CameraState:
@@ -396,7 +446,8 @@ class CameraStream(BaseCameraStream):
                 "source": str(self.source),
                 "active_source": str(self._active_source),
                 "candidates": [str(c) for c in self._candidates],
-                "is_connected": self._state == CameraState.CONNECTED and self._latest_frame is not None,
+                "enabled": self._enabled,
+                "is_connected": self._enabled and self._state == CameraState.CONNECTED and self._latest_frame is not None,
                 "state": self._state.value,
                 "resolution": {
                     "width": self._resolution[0] if self._resolution else None,

@@ -153,23 +153,18 @@ class TestUserManagementServiceUnit:
             user_service.create_user("second_admin", "SecondAdmin", "pass12345678", Role.ADMIN)
 
     def test_max_users_bound(self, user_service):
-        """Requirement 10: Max 10 users enforced."""
+        """Requirement 10: Max 10 Authorized Users enforced (Admin is outside the 10 slots)."""
         from atlas.authority.models import Role
-        from atlas.authority.user_service import MAX_USERS
-        assert MAX_USERS == 10
+        from atlas.authority.user_service import MAX_USERS, MAX_AUTHORIZED_USERS
+        assert MAX_AUTHORIZED_USERS == 10
+        assert MAX_USERS == 11
 
-        current_count = len(user_service.list_users())
-        # Create users until we hit the limit
-        created = []
-        for i in range(MAX_USERS - current_count):
-            try:
-                u = user_service.create_user(
-                    f"filler_user_{i}", f"Filler {i}", "fillpass123", Role.VIEWER
-                )
-                created.append(u.user_id)
-            except ValueError as e:
-                if "Maximum" in str(e):
-                    break
+        existing_auth = [u for u in user_service.list_users() if u.role != Role.ADMIN]
+        # Create users until we hit the 10 authorized users limit
+        for i in range(MAX_AUTHORIZED_USERS - len(existing_auth)):
+            user_service.create_user(
+                f"filler_user_{i}", f"Filler {i}", "fillpass123", Role.VIEWER
+            )
 
         with pytest.raises(ValueError, match="Maximum"):
             user_service.create_user("overflow_user", "Overflow", "overflowpass123", Role.VIEWER)

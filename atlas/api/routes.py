@@ -413,16 +413,87 @@ def camera_status():
     return jsonify(camera.get_status()), 200
 
 
+@api_bp.route("/camera/control", methods=["POST"])
+def camera_control():
+    """Server-authoritative Camera ON/OFF Control (Admin Only).
+    
+    Controls physical camera acquisition, perception processing, and live stream availability.
+    """
+    from atlas.authority.models import Permission, Role
+    from atlas.audit.schema import AuditAction
+    from atlas.audit.service import get_audit_logger
+
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    if actor.role != Role.ADMIN:
+        return jsonify({
+            "error": "Forbidden",
+            "details": "Only Administrator accounts may control home surveillance camera state."
+        }), 403
+
+    data = request.get_json(silent=True) or {}
+    if "enabled" not in data or not isinstance(data["enabled"], bool):
+        return jsonify({
+            "error": "Bad Request",
+            "details": "Field 'enabled' (boolean) is required."
+        }), 400
+
+    target_enabled = bool(data["enabled"])
+    camera = get_camera_stream()
+
+    audit_logger = get_audit_logger()
+    if target_enabled:
+        camera.enable()
+        audit_logger.record(
+            actor_id=actor.actor_id,
+            action=AuditAction.CAMERA_ENABLED,
+            target_type="camera",
+            target_id="camera_stream",
+            previous_state="off",
+            new_state="connecting",
+            reason="Administrator enabled home surveillance",
+        )
+    else:
+        camera.disable()
+        audit_logger.record(
+            actor_id=actor.actor_id,
+            action=AuditAction.CAMERA_DISABLED,
+            target_type="camera",
+            target_id="camera_stream",
+            previous_state="connected",
+            new_state="off",
+            reason="Administrator turned off home surveillance",
+        )
+
+    status = camera.get_status()
+    return jsonify({
+        "status": "ok",
+        "camera_enabled": status["enabled"],
+        "camera_state": status["state"],
+        "details": f"Camera {'enabled' if target_enabled else 'disabled'} successfully.",
+    }), 200
+
+
 @api_bp.route("/camera/frame", methods=["GET"])
 def latest_camera_frame():
     """Return the latest real frame captured by the camera as a JPEG image.
     
-    Zero-Mock Policy: Returns HTTP 503 if the camera is not connected.
+    Zero-Mock Policy: Returns HTTP 503 if the camera is not connected or turned off.
     Never returns fake or mock images.
     
     Alert-Gated Access:
     Authorized Users may access live camera frames ONLY when an active permitted alert exists.
     """
+    camera = get_camera_stream()
+    if not camera.is_enabled:
+        return jsonify({
+            "error": "Camera is currently OFF",
+            "status": "CAMERA_OFF",
+            "details": "Surveillance camera acquisition is stopped by Administrator.",
+        }), 503
+
     from atlas.authority.auth import get_auth_service
     from atlas.authority.models import Role
     auth_svc = get_auth_service()
@@ -447,7 +518,6 @@ def latest_camera_frame():
                 "details": "Live camera access for Authorized Users requires an active permitted alert."
             }), 403
 
-    camera = get_camera_stream()
     frame_data = camera.get_latest_frame()
 
     if frame_data is None:
@@ -473,9 +543,20 @@ def latest_camera_frame():
 def video_feed():
     """MJPEG stream endpoint for real-time camera preview.
     
-    Alert-Gated Access:
-    Authorized Users may access live stream ONLY when an active permitted alert exists.
+    Access Control:
+    - Admin: Full live camera access.
+    - Authorized Users: Live stream permitted ONLY when an active permitted alert exists.
+    - Unauthenticated: 401 Unauthorized (unless valid Stage 2 biometric temp_token is provided for face preview).
+    - Camera OFF: 503 Service Unavailable (CAMERA_OFF).
     """
+    camera = get_camera_stream()
+    if not camera.is_enabled:
+        return jsonify({
+            "error": "Camera is currently OFF",
+            "status": "CAMERA_OFF",
+            "details": "Surveillance camera acquisition is stopped by Administrator.",
+        }), 503
+
     from atlas.authority.auth import get_auth_service
     from atlas.authority.models import Role
     auth_svc = get_auth_service()
@@ -492,6 +573,22 @@ def video_feed():
                 from atlas.authority.service import get_authority_service
                 actor = get_authority_service().get_actor(actor_id)
 
+    # Check for biometric login preview with valid unexpired temp_token
+    is_biometric_preview = False
+    if actor is None:
+        temp_token = request.args.get("temp_token") or request.headers.get("X-Temp-Token")
+        if temp_token:
+            with _pending_lock:
+                pending = _pending_sessions.get(temp_token)
+                if pending and pending.get("expires_at", 0) >= _time.time():
+                    is_biometric_preview = True
+
+    if actor is None and not is_biometric_preview:
+        return jsonify({
+            "error": "Unauthorized",
+            "details": "Authentication required to access live camera stream."
+        }), 401
+
     if actor is not None and actor.role in (Role.AUTHORIZED_USER, Role.VIEWER):
         permitted, reason = _check_alert_gated_access(actor)
         if not permitted:
@@ -500,25 +597,32 @@ def video_feed():
                 "details": "Live camera access for Authorized Users requires an active permitted alert."
             }), 403
 
-    camera = get_camera_stream()
-
     def generate_frames():
-        while True:
+        while camera.is_enabled:
             frame_data = camera.get_latest_frame()
             if frame_data is not None:
                 frame, _ = frame_data
                 ret, jpeg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                 if ret:
-                    yield (
+                    raw_bytes = jpeg.tobytes()
+                    chunk = (
                         b"--frame\r\n"
-                        b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Content-Length: " + str(len(raw_bytes)).encode("ascii") + b"\r\n\r\n" +
+                        raw_bytes +
+                        b"\r\n"
                     )
+                    yield chunk
             time.sleep(0.04)  # ~25 FPS max stream cap for browser preview
 
-    return Response(
+    response = Response(
         generate_frames(),
         mimetype="multipart/x-mixed-replace; boundary=frame",
     )
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @api_bp.route("/diagnostics", methods=["GET"])
@@ -1465,17 +1569,20 @@ def get_admin_dashboard_state():
     audit_records = audit_logger.get_recent_records(limit=25)
 
     # Section A: HOME OVERVIEW
+    is_cam_enabled = cam_status.get("enabled", True)
+    is_cam_connected = cam_status.get("is_connected", False)
+
     subsystems = {
         "backend": "ONLINE",
-        "camera": "LIVE" if cam_status.get("is_connected") else cam_status.get("state", "DISCONNECTED").upper(),
-        "perception": "ACTIVE" if cam_status.get("is_connected") else "STANDBY",
-        "intelligence": "ACTIVE" if (latest_dec and latest_dec.llm_verification) else "STANDBY",
+        "camera": "OFF" if not is_cam_enabled else ("LIVE" if is_cam_connected else cam_status.get("state", "DISCONNECTED").upper()),
+        "perception": "OFFLINE" if not is_cam_enabled else ("ACTIVE" if is_cam_connected else "STANDBY"),
+        "intelligence": "PAUSED" if not is_cam_enabled else ("ACTIVE" if (latest_dec and latest_dec.llm_verification) else "STANDBY"),
         "rules": "ACTIVE",
-        "risk": "ACTIVE" if risk_data else "STANDBY",
+        "risk": "STANDBY" if not is_cam_enabled else ("ACTIVE" if risk_data else "STANDBY"),
         "incidents": "ACTIVE" if active_incidents else "READY",
     }
     overview = {
-        "system_status": "LIVE" if cam_status.get("is_connected") else "DEGRADED",
+        "system_status": ("CAMERA OFF" if not is_cam_enabled else ("LIVE" if is_cam_connected else "DEGRADED")),
         "subsystems": subsystems,
         "camera_status": cam_status,
         "ai_status": {
@@ -1488,12 +1595,12 @@ def get_admin_dashboard_state():
             "timeline_length": len(ctx._timeline),
         },
         "llm_verifier_status": {
-            "situation": latest_dec.llm_verification.situation if (latest_dec and latest_dec.llm_verification) else "System monitoring for physical activity.",
-            "interpretation": latest_dec.llm_verification.interpretation if (latest_dec and latest_dec.llm_verification) else "Normal home state.",
+            "situation": latest_dec.llm_verification.situation if (latest_dec and latest_dec.llm_verification) else ("Camera surveillance paused." if not is_cam_enabled else "System monitoring for physical activity."),
+            "interpretation": latest_dec.llm_verification.interpretation if (latest_dec and latest_dec.llm_verification) else ("Camera disabled." if not is_cam_enabled else "Normal home state."),
             "confidence": latest_dec.llm_verification.confidence if (latest_dec and latest_dec.llm_verification) else 1.0,
             "verified": (latest_dec.llm_verification.status == "completed") if (latest_dec and latest_dec.llm_verification) else True,
         },
-        "current_risk": risk_data,
+        "current_risk": risk_data if is_cam_enabled else None,
         "active_incidents_count": len(active_incidents),
     }
 
@@ -1501,11 +1608,15 @@ def get_admin_dashboard_state():
     live_section = {
         "stream_url": "/api/camera/video_feed",
         "frame_url": "/api/camera/frame",
-        "is_connected": cam_status.get("is_connected", False),
-        "fps": cam_status.get("fps", 0.0),
-        "observation": latest_obs.model_dump() if latest_obs else None,
-        "active_people": recent_ctx.get("persons", []),
-        "active_objects": recent_ctx.get("objects", []),
+        "enabled": is_cam_enabled,
+        "state": cam_status.get("state", "disconnected"),
+        "is_connected": is_cam_connected,
+        "fps": cam_status.get("fps", 0.0) if is_cam_enabled else 0.0,
+        "resolution": cam_status.get("resolution"),
+        "last_frame_timestamp": cam_status.get("last_frame_timestamp") if is_cam_enabled else None,
+        "observation": (latest_obs.model_dump() if latest_obs else None) if is_cam_enabled else None,
+        "active_people": recent_ctx.get("persons", []) if is_cam_enabled else [],
+        "active_objects": recent_ctx.get("objects", []) if is_cam_enabled else [],
     }
 
     # Section C: PEOPLE (real observed people)
@@ -1530,7 +1641,26 @@ def get_admin_dashboard_state():
         })
 
     # Section D: ACTIVITY (entered, exited, walking, standing, sitting, fall-like events)
-    activity_events = [e.model_dump() for e in raw_recent_events]
+    activity_events = []
+    for e in raw_recent_events:
+        ed = e.model_dump()
+        tid = None
+        if e.evidence and "track_id" in e.evidence and e.evidence["track_id"] is not None:
+            tid = e.evidence["track_id"]
+        elif e.metadata and "track_id" in e.metadata and e.metadata["track_id"] is not None:
+            tid = e.metadata["track_id"]
+        elif e.person_id is not None:
+            try:
+                tid = int(e.person_id)
+            except (ValueError, TypeError):
+                tid = e.person_id
+        elif e.object_id is not None:
+            try:
+                tid = int(e.object_id)
+            except (ValueError, TypeError):
+                tid = e.object_id
+        ed["track_id"] = tid
+        activity_events.append(ed)
 
     # Section E: OBJECTS (tracked object, position, movement, disappearance, history)
     objects_list = []
@@ -1994,6 +2124,21 @@ def auth_login_face():
     if not query_image:
         from atlas.camera.stream import get_camera_stream
         cam = get_camera_stream()
+        if not cam.is_enabled:
+            svc.log_login_event(
+                user_id=user_id, username=username, role=role_str,
+                status="FACE_DENIED", face_confidence=0.0,
+                ip_address=ip_addr, user_agent=ua,
+                details={"error": "CAMERA_UNAVAILABLE", "reason": "Camera is currently OFF."},
+            )
+            return jsonify({
+                "error": "CAMERA_UNAVAILABLE",
+                "details": "Camera is currently OFF. Turn on the camera to continue biometric verification.",
+                "status": "CAMERA_UNAVAILABLE",
+                "face_verified": False,
+                "confidence": 0.0,
+            }), 503
+
         frame_data = cam.get_latest_frame()
         if frame_data is None:
             svc.log_login_event(
@@ -2165,6 +2310,8 @@ def admin_create_user():
     username = (data.get("username") or "").strip()
     display_name = (data.get("display_name") or username).strip()
     password = data.get("password") or ""
+    phone_number = (data.get("phone_number") or data.get("mobile") or "").strip() or None
+    relationship = (data.get("relationship") or "").strip() or None
     role_str = (data.get("role") or "AUTHORIZED_USER").upper()
 
     if not username or not password:
@@ -2177,10 +2324,34 @@ def admin_create_user():
 
     svc = get_user_management_service()
     try:
-        new_user = svc.create_user(username, display_name, password, role)
+        new_user = svc.create_user(
+            username,
+            display_name,
+            password,
+            role,
+            phone_number=phone_number,
+            relationship=relationship,
+        )
+        try:
+            from atlas.audit.service import get_audit_logger
+            get_audit_logger().log_security_event(
+                actor_id=actor.actor_id,
+                action="USER_CREATED",
+                target_id=new_user.user_id,
+                reason=f"Created user '{new_user.username}' with role '{new_user.role.value}' (status={new_user.enrollment_status}).",
+            )
+        except Exception:
+            pass
+
+        msg = (
+            "Face enrollment required before account activation."
+            if new_user.role != Role.ADMIN
+            else f"Admin user '{username}' created successfully."
+        )
         return jsonify({
             "status": "ok",
-            "message": f"User '{username}' created successfully.",
+            "message": msg,
+            "enrollment_required": new_user.role != Role.ADMIN,
             "user": new_user.public_dict(),
         }), 201
     except ValueError as exc:
@@ -2225,7 +2396,7 @@ def admin_update_user_status(user_id: str):
         return jsonify({"error": "Bad Request", "details": str(exc)}), 400
 
 
-@api_bp.route("/admin/users/<user_id>", methods=["PUT"])
+@api_bp.route("/admin/users/<user_id>", methods=["PUT", "PATCH"])
 def admin_update_user(user_id: str):
     """Update user account details (requires MANAGE_USERS)."""
     actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
@@ -2237,19 +2408,44 @@ def admin_update_user(user_id: str):
 
     data = request.get_json(silent=True) or {}
     display_name = data.get("display_name")
+    username = data.get("username")
+    phone_number = data.get("phone_number") or data.get("mobile")
+    relationship = data.get("relationship")
     role_str = data.get("role")
     is_active = data.get("is_active")
     password = data.get("password")
 
     svc = get_user_management_service()
     try:
-        role = Role(role_str) if role_str else None
-        user = svc.update_user(user_id, display_name=display_name, role=role)
-        if is_active is not None:
-            user = svc.update_user_status(user_id, bool(is_active))
+        role = Role(role_str.upper()) if role_str else None
+        user = svc.update_user(
+            user_id,
+            display_name=display_name,
+            username=username,
+            role=role,
+            phone_number=phone_number,
+            relationship=relationship,
+            is_active=is_active,
+        )
         if password:
             svc.change_password(user_id, password)
-        return jsonify({"status": "ok", "user": user.public_dict()}), 200
+
+        try:
+            from atlas.audit.service import get_audit_logger
+            get_audit_logger().log_security_event(
+                actor_id=actor.actor_id,
+                action="USER_UPDATED",
+                target_id=user_id,
+                reason=f"Admin updated user details for '{user.username}'.",
+            )
+        except Exception:
+            pass
+
+        return jsonify({
+            "status": "ok",
+            "message": f"User '{user.username}' updated successfully.",
+            "user": user.public_dict(),
+        }), 200
     except KeyError as exc:
         return jsonify({"error": "Not Found", "details": str(exc)}), 404
     except ValueError as exc:
@@ -2265,9 +2461,21 @@ def admin_delete_user(user_id: str):
 
     from atlas.authority.user_service import get_user_management_service
     svc = get_user_management_service()
+    account = svc.get_user_by_id(user_id)
+    uname = account.username if account else user_id
     try:
         svc.delete_user(user_id)
-        return jsonify({"status": "ok", "message": f"User '{user_id}' deleted."}), 200
+        try:
+            from atlas.audit.service import get_audit_logger
+            get_audit_logger().log_security_event(
+                actor_id=actor.actor_id,
+                action="USER_REMOVED",
+                target_id=user_id,
+                reason=f"Authorized user '{uname}' was removed by Admin.",
+            )
+        except Exception:
+            pass
+        return jsonify({"status": "ok", "message": f"User '{uname}' removed successfully."}), 200
     except KeyError as exc:
         return jsonify({"error": "Not Found", "details": str(exc)}), 404
     except ValueError as exc:
@@ -2433,40 +2641,6 @@ def admin_identity_bounds():
     }), 200
 
 
-@api_bp.route("/admin/users/<user_id>", methods=["PUT", "PATCH"])
-def admin_edit_user(user_id: str):
-    """Edit user display name or role (requires MANAGE_USERS)."""
-    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
-    if err_resp:
-        return err_resp
-
-    from atlas.authority.user_service import get_user_management_service
-    from atlas.authority.models import Role
-
-    data = request.get_json(silent=True) or {}
-    display_name = data.get("display_name")
-    role_str = data.get("role")
-    role = None
-    if role_str:
-        try:
-            role = Role(role_str.upper())
-        except ValueError:
-            return jsonify({"error": "Bad Request", "details": f"Invalid role '{role_str}'."}), 400
-
-    svc = get_user_management_service()
-    try:
-        updated = svc.update_user(user_id, display_name=display_name, role=role)
-        return jsonify({
-            "status": "ok",
-            "message": f"User '{updated.username}' updated successfully.",
-            "user": updated.public_dict(),
-        }), 200
-    except KeyError as exc:
-        return jsonify({"error": "Not Found", "details": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"error": "Bad Request", "details": str(exc)}), 400
-
-
 @api_bp.route("/admin/users/slots", methods=["GET"])
 def admin_user_slots():
     """Retrieve 10-slot identity summary (requires MANAGE_USERS)."""
@@ -2480,4 +2654,274 @@ def admin_user_slots():
         "status": "ok",
         **svc.get_user_slots_summary(),
     }), 200
+
+
+# ============================================================================
+# Final Integration Phase: Multi-Sample Biometrics, Re-Auth, Profile & Chat
+# ============================================================================
+
+@api_bp.route("/admin/profile", methods=["PATCH"])
+def admin_update_profile():
+    """Update Admin display name (e.g. 'Priya') (requires MANAGE_USERS)."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    data = request.get_json(silent=True) or {}
+    display_name = (data.get("display_name") or "").strip()
+    if not display_name:
+        return jsonify({"error": "Bad Request", "details": "display_name is required."}), 400
+
+    from atlas.authority.user_service import get_user_management_service
+    svc = get_user_management_service()
+    try:
+        updated = svc.update_admin_display_name(display_name)
+        return jsonify({
+            "status": "ok",
+            "message": f"Admin display name updated to '{updated.display_name}'.",
+            "user": updated.public_dict(),
+        }), 200
+    except Exception as exc:
+        return jsonify({"error": "Error", "details": str(exc)}), 400
+
+
+@api_bp.route("/auth/reauthenticate", methods=["POST"])
+def auth_reauthenticate():
+    """Admin re-authentication for sensitive actions (requires Admin password + face verification)."""
+    from atlas.authority.auth import get_auth_service
+    from atlas.authority.user_service import get_user_management_service
+    from atlas.authority.face import get_face_biometrics_engine
+    from atlas.camera.stream import get_camera_stream
+
+    auth_svc = get_auth_service()
+    actor = auth_svc.get_current_actor(request)
+    if actor is None or actor.role != Role.ADMIN:
+        return jsonify({"error": "Forbidden", "details": "Admin credentials required for re-authentication."}), 403
+
+    data = request.get_json(silent=True) or {}
+    password = data.get("password") or ""
+    image_data = data.get("image_data") or ""
+
+    from werkzeug.security import check_password_hash
+    user_svc = get_user_management_service()
+    admin_account = user_svc.get_user_by_id(actor.actor_id)
+    if admin_account is None or not check_password_hash(admin_account.password_hash, password):
+        return jsonify({"error": "Unauthorized", "details": "Invalid admin password."}), 401
+
+    face_engine = get_face_biometrics_engine()
+    if not image_data:
+        camera = get_camera_stream()
+        frame_data = camera.get_latest_frame()
+        if frame_data is None:
+            return jsonify({
+                "error": "Camera Unavailable",
+                "details": "Live camera stream unavailable for face re-authentication.",
+            }), 503
+        frame, frame_ts = frame_data
+    else:
+        try:
+            frame = face_engine.decode_image_payload(image_data)
+            frame_ts = None
+        except Exception as exc:
+            return jsonify({"error": "Bad Request", "details": f"Invalid image payload: {exc}"}), 400
+
+    # Physical frame validation
+    valid, f_stat, f_reason = face_engine.validate_frame(frame, timestamp=frame_ts)
+    if not valid:
+        return jsonify({"error": "Frame Validation Failed", "details": f_reason}), 400
+
+    # Face verification against Admin enrolled template (or quality check if not yet enrolled)
+    if admin_account.enrolled_embedding:
+        v_res = face_engine.verify(
+            target_user_id=admin_account.user_id,
+            enrolled_embedding=admin_account.enrolled_embedding,
+            query_image=frame,
+            save_snapshot=True,
+            frame_timestamp=frame_ts,
+        )
+        if not v_res.verified:
+            return jsonify({
+                "error": "Face Verification Denied",
+                "details": f"Face does not match Admin template (similarity {v_res.confidence:.2f} < {v_res.threshold:.2f}).",
+                "confidence": v_res.confidence,
+            }), 401
+    else:
+        # If Admin has no enrolled face yet, enforce single face detection quality check
+        face_ok, face_stat, _, meta = face_engine.detect_face(frame)
+        if not face_ok:
+            return jsonify({"error": "Face Required", "details": meta.get("reason", "Face verification failed.")}), 400
+
+    user_svc.record_admin_reauth(admin_account.user_id)
+    return jsonify({
+        "status": "ok",
+        "message": "Admin re-authenticated successfully.",
+        "valid_for_seconds": 300,
+    }), 200
+
+
+@api_bp.route("/admin/users/<user_id>/face/sample", methods=["POST"])
+def admin_capture_face_sample(user_id: str):
+    """Capture and validate a single real camera sample for multi-frame biometric enrollment."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    from atlas.authority.face import get_face_biometrics_engine
+    from atlas.authority.user_service import get_user_management_service
+    from atlas.camera.stream import get_camera_stream
+
+    user_svc = get_user_management_service()
+    account = user_svc.get_user_by_id(user_id)
+    if account is None:
+        return jsonify({"error": "Not Found", "details": f"User '{user_id}' not found."}), 404
+
+    face_engine = get_face_biometrics_engine()
+    data = request.get_json(silent=True) or {}
+    image_data = data.get("image_data") or ""
+
+    if not image_data:
+        camera = get_camera_stream()
+        frame_data = camera.get_latest_frame()
+        if frame_data is None:
+            return jsonify({
+                "error": "Camera Unavailable",
+                "details": "No real camera frame available from webcam stream.",
+                "status": "CAMERA_UNAVAILABLE",
+            }), 503
+        frame, frame_ts = frame_data
+    else:
+        try:
+            frame = face_engine.decode_image_payload(image_data)
+            frame_ts = None
+        except Exception as exc:
+            return jsonify({"error": "Bad Request", "details": f"Invalid image payload: {exc}"}), 400
+
+    # Validate physical sample (optical variance, single face, blur, contrast, 1856-D embedding)
+    is_valid, stat_code, embedding, meta = face_engine.validate_enrollment_sample(frame, timestamp=frame_ts)
+    if not is_valid or embedding is None:
+        return jsonify({
+            "error": "Sample Rejected",
+            "status": stat_code,
+            "details": meta.get("reason", "Face sample did not meet quality requirements."),
+            "metadata": meta,
+        }), 400
+
+    sample_count = user_svc.add_enrollment_sample(user_id, embedding.tolist())
+    target_samples = 5
+    return jsonify({
+        "status": "ok",
+        "message": f"Sample {sample_count} of {target_samples} accepted.",
+        "sample_index": sample_count,
+        "sample_count": sample_count,
+        "target_samples": target_samples,
+        "is_ready_to_enroll": sample_count >= target_samples,
+        "metadata": meta,
+        "quality": meta,
+    }), 200
+
+
+@api_bp.route("/admin/users/<user_id>/face/enroll-multi", methods=["POST"])
+def admin_enroll_multi_sample(user_id: str):
+    """Fuse accumulated biometric samples and activate the user account."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    from atlas.authority.face import get_face_biometrics_engine
+    from atlas.authority.user_service import get_user_management_service
+    from atlas.camera.stream import get_camera_stream
+
+    user_svc = get_user_management_service()
+    account = user_svc.get_user_by_id(user_id)
+    if account is None:
+        return jsonify({"error": "Not Found", "details": f"User '{user_id}' not found."}), 404
+
+    samples = user_svc.get_enrollment_samples(user_id)
+    if len(samples) < 3:
+        return jsonify({
+            "error": "Insufficient Samples",
+            "details": f"At least 3 valid samples are required (currently {len(samples)}/5).",
+            "current_count": len(samples),
+        }), 400
+
+    face_engine = get_face_biometrics_engine()
+    try:
+        fused_embedding = face_engine.fuse_multi_sample_embeddings(samples)
+
+        # Save snapshot using latest frame from camera
+        camera = get_camera_stream()
+        frame_data = camera.get_latest_frame()
+        snap_path = None
+        snap_hash = None
+        if frame_data is not None:
+            frame, _ = frame_data
+            snap_path, snap_hash = face_engine.save_verification_snapshot(frame, user_id, "ENROLLED_MULTI")
+
+        user_svc.enroll_face(user_id, fused_embedding.tolist(), image_path=snap_path or None)
+        updated_account = user_svc.get_user_by_id(user_id)
+
+        return jsonify({
+            "status": "ok",
+            "message": f"Biometric template enrolled successfully. User '{account.username}' is now ACTIVE.",
+            "samples_fused": len(samples),
+            "embedding_dim": len(fused_embedding),
+            "snapshot_path": snap_path,
+            "snapshot_sha256": snap_hash,
+            "user": updated_account.public_dict() if updated_account else None,
+        }), 200
+    except Exception as exc:
+        return jsonify({"error": "Processing Error", "details": str(exc)}), 500
+
+
+@api_bp.route("/chat/message", methods=["POST"])
+@api_bp.route("/assistant/message", methods=["POST"])
+def chat_message():
+    """Conversational ATLAS Assistant inquiry grounded in real operational data."""
+    actor, err_resp = _resolve_request_actor(perm=None)
+    if err_resp:
+        return err_resp
+
+    data = request.get_json(silent=True) or {}
+    message = (data.get("message") or "").strip()
+    if not message:
+        return jsonify({"error": "Bad Request", "details": "message is required."}), 400
+
+    from atlas.chat.service import get_chat_service
+    chat_svc = get_chat_service()
+    response_payload = chat_svc.query(message, actor)
+
+    return jsonify({
+        "status": "ok",
+        "response": response_payload,
+        "answer": response_payload.get("answer"),
+        "confidence_status": response_payload.get("confidence_status"),
+        "citations": response_payload.get("citations", []),
+        "why_atlas_said_this": response_payload.get("why_atlas_said_this"),
+        "model": response_payload.get("model"),
+    }), 200
+
+
+@api_bp.route("/chat/history", methods=["GET"])
+@api_bp.route("/assistant/history", methods=["GET"])
+def chat_history():
+    """Retrieve recent conversational assistant interactions."""
+    actor, err_resp = _resolve_request_actor(perm=None)
+    if err_resp:
+        return err_resp
+
+    from atlas.chat.service import get_chat_service
+    chat_svc = get_chat_service()
+    history = chat_svc.get_history(limit=50)
+
+    # Authorized Users only see their own interactions or public safety answers
+    if actor.role != Role.ADMIN:
+        history = [h for h in history if h.get("actor_id") == actor.actor_id or h.get("actor_role") == "AUTHORIZED_USER"]
+
+    return jsonify({
+        "status": "ok",
+        "history": history,
+    }), 200
+
+
+
 

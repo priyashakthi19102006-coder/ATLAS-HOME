@@ -85,7 +85,7 @@ def step9_env(tmp_path):
     # Add an Authorized User
     auth_user_acc = user_svc.get_user_by_username("john_family")
     if not auth_user_acc:
-        auth_user_acc = user_svc.create_user("john_family", "JohnPass123!", "John Family", Role.AUTHORIZED_USER)
+        auth_user_acc = user_svc.create_user("john_family", "JohnPass123!", "John Family", Role.AUTHORIZED_USER, is_active=True)
 
     providers = ProviderRegistry(settings=settings)
     notif_svc = NotificationService(

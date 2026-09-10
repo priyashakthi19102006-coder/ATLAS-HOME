@@ -139,6 +139,22 @@ class AuthService:
                 return True
             return False
 
+    def invalidate_sessions_for_user(self, identifier: str) -> int:
+        """Invalidate all active sessions for a given username or user_id."""
+        if not identifier:
+            return 0
+        with self._lock:
+            tokens_to_remove = [
+                token for token, sess in self._sessions.items()
+                if (sess.get("actor") and sess["actor"].actor_id == identifier)
+                or sess.get("username") == identifier
+            ]
+            for token in tokens_to_remove:
+                del self._sessions[token]
+            if tokens_to_remove:
+                logger.info("Invalidated %d active sessions for user '%s'", len(tokens_to_remove), identifier)
+            return len(tokens_to_remove)
+
     def extract_token_from_request(self, req: Any) -> str | None:
         """Extract session token from Authorization Bearer, X-Session-Token, or cookies."""
         # 1. Check Authorization header

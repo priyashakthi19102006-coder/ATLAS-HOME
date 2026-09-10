@@ -394,6 +394,129 @@ class FaceBiometricsEngine:
                 details={"error": str(exc), "status": "ERROR"},
             )
 
+    def validate_enrollment_sample(
+        self,
+        frame: np.ndarray,
+        timestamp: float | None = None,
+    ) -> Tuple[bool, str, np.ndarray | None, dict[str, Any]]:
+        """Validate a single live physical camera frame for multi-sample enrollment.
+        
+        Enforces:
+        - Optical variance & physical frame checks
+        - Exactly one face detected
+        - Minimum resolution, contrast, and focus quality
+        - Extracts 1856-D normalized biometric embedding
+        
+        Returns:
+            (is_valid, status_code, embedding_1856d, metadata_dict)
+        """
+        valid, f_stat, f_reason = self.validate_frame(frame, timestamp=timestamp)
+        if not valid:
+            return False, f_stat, None, {"reason": f_reason}
+
+        face_ok, face_stat, crop, meta = self.detect_face(frame)
+        if not face_ok or crop is None:
+            return False, face_stat, None, meta
+
+        if "blur_score" not in meta:
+            gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+            meta["blur_score"] = float(cv2.Laplacian(gray_crop, cv2.CV_64F).var())
+            meta["contrast"] = float(np.std(gray_crop))
+
+        blur = meta.get("blur_score", 0.0)
+        contrast = meta.get("contrast", 0.0)
+        if blur < 8.0:
+            return False, "QUALITY_BLURRED", None, {"reason": "Image too blurry. Please hold steady.", **meta}
+        if contrast < 10.0:
+            return False, "QUALITY_LOW_CONTRAST", None, {"reason": "Insufficient lighting or contrast.", **meta}
+
+        try:
+            embedding = self.compute_embedding(crop)
+            return True, "SAMPLE_ACCEPTED", embedding, {
+                "quality": "GOOD",
+                "blur_score": blur,
+                "contrast": contrast,
+                "embedding_dim": len(embedding),
+                "bbox": meta.get("bbox"),
+            }
+        except Exception as exc:
+            return False, "PROCESSING_ERROR", None, {"reason": str(exc)}
+
+    def fuse_multi_sample_embeddings(self, embeddings: list[np.ndarray | list[float]]) -> np.ndarray:
+        """Fuse multiple 1856-D sample vectors into a unified L2-normalized template."""
+        if not embeddings:
+            raise ValueError("No embeddings provided for fusion.")
+
+        valid_vecs = []
+        for emb in embeddings:
+            arr = np.asarray(emb, dtype=np.float32).ravel()
+            if len(arr) == 1856 and not np.isnan(arr).any():
+                n = float(np.linalg.norm(arr))
+                if n > 0:
+                    valid_vecs.append(arr / n)
+
+        if not valid_vecs:
+            raise ValueError("No valid 1856-D embeddings available for biometric fusion.")
+
+        stacked = np.stack(valid_vecs, axis=0)
+        mean_vec = np.mean(stacked, axis=0)
+        norm = float(np.linalg.norm(mean_vec))
+        if norm > 0:
+            fused = mean_vec / norm
+        else:
+            fused = valid_vecs[0]
+        return fused.astype(np.float32)
+
+    def identify_face(
+        self,
+        frame_or_crop: np.ndarray,
+        candidates: list[tuple[str, str, list[float]]],
+        threshold: float = DEFAULT_VERIFICATION_THRESHOLD,
+    ) -> Tuple[str, str, float, bool]:
+        """Match query face against enrolled user templates.
+        
+        Args:
+            frame_or_crop: Query image (full frame or cropped face)
+            candidates: List of (user_id, display_name, enrolled_1856d_embedding)
+            threshold: Cosine similarity cutoff (default 0.70)
+            
+        Returns:
+            (user_id, display_name, similarity, is_identified)
+            If unidentified or below threshold: ("UNKNOWN", "Unknown Person", max_sim, False)
+        """
+        if not candidates or frame_or_crop is None or frame_or_crop.size == 0:
+            return "UNKNOWN", "Unknown Person", 0.0, False
+
+        # Extract 128x128 face crop
+        try:
+            crop = self.extract_face_crop(frame_or_crop)
+            query_emb = self.compute_embedding(crop)
+        except Exception:
+            return "UNKNOWN", "Unknown Person", 0.0, False
+
+        best_user_id = "UNKNOWN"
+        best_name = "Unknown Person"
+        best_sim = 0.0
+        second_sim = 0.0
+
+        for uid, name, enrolled in candidates:
+            if not enrolled:
+                continue
+            sim = self.compare_embeddings(query_emb, enrolled)
+            if sim > best_sim:
+                second_sim = best_sim
+                best_sim = sim
+                best_user_id = uid
+                best_name = name
+            elif sim > second_sim:
+                second_sim = sim
+
+        # Conservatism: Must meet threshold, and if multiple candidates exist, cannot be ambiguous
+        if best_sim >= threshold and (len(candidates) < 2 or (best_sim - second_sim) >= 0.02):
+            return best_user_id, best_name, round(best_sim, 4), True
+
+        return "UNKNOWN", "Unknown Person", round(best_sim, 4), False
+
 
 # Global singleton engine
 _global_face_engine: FaceBiometricsEngine | None = None

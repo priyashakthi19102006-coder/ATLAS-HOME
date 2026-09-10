@@ -56,7 +56,7 @@ class EventEngine:
     def __init__(
         self,
         context_manager: Any = None,
-        track_expiry_seconds: float = 2.0,
+        track_expiry_seconds: float = 5.0,
         association_distance_px: float = 160.0,
     ) -> None:
         if context_manager is None:
@@ -94,7 +94,7 @@ class EventEngine:
                 bbox_dict = person.bbox.model_dump()
                 center_dict = person.center.model_dump()
 
-                # Update context memory
+                # Update context memory with real identity and visual attributes
                 self.context_manager.update_person_track(
                     track_id=pid,
                     action=person.action.label,
@@ -103,10 +103,14 @@ class EventEngine:
                     center=center_dict,
                     confidence=person.confidence,
                     timestamp=now,
+                    identity_status=person.identity_status,
+                    person_name=person.person_name,
+                    user_id=person.user_id,
+                    visual_attributes=person.visual_attributes,
                 )
 
                 if pid not in self._person_states:
-                    # New Track -> Emit PERSON_ENTERED
+                    # New Track -> Emit PERSON_ENTERED (OBSERVED transition)
                     enter_event = ATLASEvent(
                         event_type=EventType.PERSON_ENTERED.value,
                         source=obs.source,
@@ -125,8 +129,16 @@ class EventEngine:
                             "action_confidence": person.action.confidence,
                             "movement": person.movement.model_dump(),
                             "bbox": [person.bbox.x1, person.bbox.y1, person.bbox.x2, person.bbox.y2],
+                            "person_name": person.person_name,
+                            "identity_status": person.identity_status,
+                            "visual_attributes": person.visual_attributes,
                         },
-                        metadata={"lifecycle": "enter"},
+                        metadata={
+                            "lifecycle": "enter",
+                            "person_name": person.person_name,
+                            "identity_status": person.identity_status,
+                            "track_id": pid,
+                        },
                     )
                     emitted_events.append(enter_event)
 
@@ -165,7 +177,7 @@ class EventEngine:
                                 "movement": person.movement.model_dump(),
                                 "bbox": [person.bbox.x1, person.bbox.y1, person.bbox.x2, person.bbox.y2],
                             },
-                            metadata={"note": "Perceptual fall-like trajectory; requires deterministic safety rule evaluation"},
+                            metadata={"note": "Perceptual fall-like trajectory; requires deterministic safety rule evaluation", "track_id": pid},
                         )
                         emitted_events.append(fall_event)
                         state.active_event_ids.add(fall_event.event_id)
@@ -173,6 +185,15 @@ class EventEngine:
 
                     # Action transition (e.g. standing -> walking, standing -> sitting)
                     elif person.action.label != state.last_action and person.action.label != "unknown":
+                        # Transition previous active action events to RESOLVED
+                        for prev_eid in list(state.active_event_ids):
+                            if prev_eid != state.presence_event_id:
+                                try:
+                                    self.context_manager.storage.update_event_status(prev_eid, EventStatus.RESOLVED.value)
+                                    state.active_event_ids.remove(prev_eid)
+                                except Exception:
+                                    pass
+
                         event_type_map = {
                             "standing": EventType.PERSON_STANDING.value,
                             "walking": EventType.PERSON_WALKING.value,
@@ -196,8 +217,10 @@ class EventEngine:
                                 "action": person.action.label,
                                 "movement": person.movement.model_dump(),
                             },
+                            metadata={"track_id": pid, "person_name": person.person_name},
                         )
                         emitted_events.append(action_ev)
+                        state.active_event_ids.add(action_ev.event_id)
                         state.last_action = person.action.label
 
                     # Movement transition (e.g. stationary -> moving)
@@ -243,6 +266,9 @@ class EventEngine:
                     center=center_dict,
                     confidence=obj.confidence,
                     timestamp=now,
+                    approximate_color=obj.approximate_color,
+                    associated_person_track_id=obj.associated_person_track_id,
+                    associated_person_name=obj.associated_person_name,
                 )
 
                 if oid not in self._object_states:
@@ -262,8 +288,15 @@ class EventEngine:
                             "class_name": obj.class_name,
                             "confidence": obj.confidence,
                             "movement": obj.movement.model_dump(),
+                            "approximate_color": obj.approximate_color,
+                            "associated_person_name": obj.associated_person_name,
                         },
-                        metadata={"class_name": obj.class_name},
+                        metadata={
+                            "class_name": obj.class_name,
+                            "approximate_color": obj.approximate_color,
+                            "associated_person_name": obj.associated_person_name,
+                            "track_id": oid,
+                        },
                     )
                     emitted_events.append(obj_enter)
 

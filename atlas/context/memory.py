@@ -62,8 +62,12 @@ class ContextManager:
         center: dict[str, float] | None,
         confidence: float,
         timestamp: float,
+        identity_status: str = "UNKNOWN",
+        person_name: str = "Unknown Person",
+        user_id: str | None = None,
+        visual_attributes: dict[str, Any] | None = None,
     ) -> None:
-        """Update recent situational context for a tracked person."""
+        """Update recent situational context for a tracked person with real-data identity."""
         with self._lock:
             if track_id in self._persons:
                 ctx = self._persons[track_id]
@@ -78,6 +82,17 @@ class ContextManager:
                 ctx["confidence"] = confidence
                 ctx["last_seen"] = timestamp
                 ctx["active"] = True
+                ctx["identity_status"] = identity_status
+                ctx["person_name"] = person_name
+                ctx["user_id"] = user_id
+                if visual_attributes:
+                    ctx["visual_attributes"] = visual_attributes
+
+                # Append to activity history if action changed
+                act_hist = ctx.get("activity_history", [])
+                if not act_hist or act_hist[-1]["action"] != action:
+                    act_hist.append({"timestamp": timestamp, "action": action, "movement": movement_state})
+                    ctx["activity_history"] = act_hist[-20:]
             else:
                 self._persons[track_id] = {
                     "track_id": track_id,
@@ -91,6 +106,11 @@ class ContextManager:
                     "center": center,
                     "confidence": confidence,
                     "active": True,
+                    "identity_status": identity_status,
+                    "person_name": person_name,
+                    "user_id": user_id,
+                    "visual_attributes": visual_attributes or {},
+                    "activity_history": [{"timestamp": timestamp, "action": action, "movement": movement_state}],
                 }
 
     def update_object_track(
@@ -102,6 +122,9 @@ class ContextManager:
         center: dict[str, float] | None,
         confidence: float,
         timestamp: float,
+        approximate_color: str | None = None,
+        associated_person_track_id: int | None = None,
+        associated_person_name: str | None = None,
     ) -> None:
         """Update recent situational context for a tracked non-person object."""
         with self._lock:
@@ -115,6 +138,11 @@ class ContextManager:
                 ctx["confidence"] = confidence
                 ctx["last_seen"] = timestamp
                 ctx["active"] = True
+                if approximate_color:
+                    ctx["approximate_color"] = approximate_color
+                if associated_person_track_id is not None:
+                    ctx["associated_person_track_id"] = associated_person_track_id
+                    ctx["associated_person_name"] = associated_person_name
             else:
                 self._objects[track_id] = {
                     "track_id": track_id,
@@ -127,6 +155,9 @@ class ContextManager:
                     "center": center,
                     "confidence": confidence,
                     "active": True,
+                    "approximate_color": approximate_color,
+                    "associated_person_track_id": associated_person_track_id,
+                    "associated_person_name": associated_person_name,
                 }
 
     def mark_track_inactive(self, track_id: int, is_person: bool = True) -> None:
