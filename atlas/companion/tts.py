@@ -63,7 +63,7 @@ def clean_text_for_tts(text: str) -> str:
 MAX_ESP32_AUDIO_BYTES = 50000  # Firmware audio buffer limit is ~60-64KB; 50KB (~3.1s) ensures safe playback
 
 
-def split_text_into_speech_chunks(text: str, max_chars: int = 40) -> list[str]:
+def split_text_into_speech_chunks(text: str, max_chars: int = 180) -> list[str]:
     """Split text into sentence/clause-bounded chunks suitable for ESP32 SRAM audio buffer limits."""
     cleaned = clean_text_for_tts(text)
     if not cleaned:
@@ -117,7 +117,7 @@ def text_to_speech_packets(
     if not cleaned:
         return []
 
-    chunks = split_text_into_speech_chunks(cleaned, max_chars=40)
+    chunks = split_text_into_speech_chunks(cleaned, max_chars=180)
     packets: list[Tuple[bytes, float]] = []
 
     for c in chunks:

@@ -190,6 +190,7 @@ class TestCompanionService:
         # Scenario 1: Warning/Incident -> SURPRISED
         mock_chat.query.return_value = {
             "answer": "There is an active warning: unauthorized person at perimeter.",
+            "emotion": "surprised",
             "confidence_status": "ANSWERABLE",
             "citations": ["INCIDENT-001"],
             "why_atlas_said_this": "Observed unfamiliar individual",
@@ -203,6 +204,7 @@ class TestCompanionService:
         # Scenario 2: Normal/Secure -> HAPPY
         mock_chat.query.return_value = {
             "answer": "All entryways are safe and perimeter is secure.",
+            "emotion": "happy",
             "confidence_status": "ANSWERABLE",
             "citations": ["OBS-002"],
         }
@@ -212,6 +214,7 @@ class TestCompanionService:
         # Scenario 3: Unclear/Unknown -> CONFUSED
         mock_chat.query.return_value = {
             "answer": "I don't have enough information to confirm that.",
+            "emotion": "confused",
             "confidence_status": "UNANSWERABLE",
             "citations": [],
         }

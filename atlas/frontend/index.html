@@ -459,6 +459,34 @@
     <!-- ===================================================================== -->
     <div id="view-admin-companion" class="dashboard-view" style="display: none;">
       
+      <!-- ATLAS COMPANION Command Interface Status Banner -->
+      <div class="companion-command-strip" style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; padding: 14px 20px; margin-bottom: 20px; backdrop-filter: blur(8px);">
+        <div class="comp-strip-left" style="display: flex; align-items: center; gap: 12px;">
+          <div style="font-size: 20px;">🤖</div>
+          <div>
+            <h1 style="font-size: 16px; font-weight: 800; letter-spacing: 0.1em; color: #fff; margin: 0; font-family: var(--font-mono, monospace);">ATLAS COMPANION</h1>
+            <div style="font-size: 10px; color: var(--text-dim, #94a3b8); letter-spacing: 0.05em;">PHYSICAL ROBOT INTEGRATION &amp; CORE INTELLIGENCE</div>
+          </div>
+        </div>
+        <div class="comp-strip-right" style="display: flex; gap: 24px; align-items: center; font-family: var(--font-mono, monospace); font-size: 12px;">
+          <div class="comp-status-item" id="comp-status-robot" style="display: flex; align-items: center; gap: 6px;">
+            <span class="comp-status-dot" id="comp-robot-dot" style="color: #22c55e; font-size: 14px;">●</span>
+            <span style="color: var(--text-dim, #94a3b8);">Robot:</span>
+            <strong id="comp-robot-val" style="color: #fff;">Connected</strong>
+          </div>
+          <div class="comp-status-item" id="comp-status-ollama" style="display: flex; align-items: center; gap: 6px;">
+            <span class="comp-status-dot" id="comp-ollama-dot" style="color: #22c55e; font-size: 14px;">●</span>
+            <span style="color: var(--text-dim, #94a3b8);">Ollama:</span>
+            <strong id="comp-ollama-val" style="color: #fff;">Online</strong>
+          </div>
+          <div class="comp-status-item" id="comp-status-state" style="display: flex; align-items: center; gap: 6px;">
+            <span class="comp-status-dot" id="comp-state-dot" style="color: #38bdf8; font-size: 14px;">●</span>
+            <span style="color: var(--text-dim, #94a3b8);">State:</span>
+            <strong id="comp-state-val" style="color: #38bdf8;">Idle</strong>
+          </div>
+        </div>
+      </div>
+
       <!-- Top Row: Connection Status & State Overview -->
       <div class="companion-grid">
         
@@ -509,6 +537,9 @@
               <button type="button" class="btn btn-secondary btn-sm" id="btn-companion-refresh">
                 <span>🔄</span> REFRESH
               </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-servo-test" title="Run physical 90->60->120->90 servo movement test">
+                <span>🤖</span> SERVO TEST
+              </button>
               <button type="button" class="btn btn-primary btn-sm" id="btn-test-companion">
                 <span>⚡</span> TEST COMPANION
               </button>
@@ -547,8 +578,16 @@
             <span id="companion-avatar-icon">🤖</span>
           </div>
 
-          <div class="companion-state-pill badge badge-live" id="companion-state-label">
-            IDLE
+          <!-- Synchronized State & Robot Indicators -->
+          <div class="companion-dual-status-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; margin-bottom: 12px;">
+            <div class="companion-status-box" style="background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px; text-align: center;">
+              <div style="font-size: 9px; font-family: var(--font-mono); color: var(--text-dim); letter-spacing: 0.08em; margin-bottom: 4px;">STATE</div>
+              <div id="companion-state-label" class="badge badge-live" style="font-size: 11px; width: 100%; justify-content: center;">IDLE</div>
+            </div>
+            <div class="companion-status-box" style="background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px; text-align: center;">
+              <div style="font-size: 9px; font-family: var(--font-mono); color: var(--text-dim); letter-spacing: 0.08em; margin-bottom: 4px;">ROBOT</div>
+              <div id="companion-robot-label" class="badge badge-subtle" style="font-size: 11px; width: 100%; justify-content: center;">IDLE</div>
+            </div>
           </div>
 
           <div class="companion-state-desc" id="companion-state-description">
@@ -588,42 +627,46 @@
             <div>
               <h2>LIVE COMPANION CONVERSATION &amp; SERIAL FORWARDING</h2>
               <span class="subtitle-text">Queries are grounded in real ATLAS safety context and speech is forwarded directly to physical robot on COM5</span>
+              <div style="font-size: 10px; color: var(--text-dim); margin-top: 2px;">
+                Conversational chat is authorized via your active Web Admin session and is never blocked by biometric face checks.
+              </div>
             </div>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <span class="badge badge-live" id="comp-chat-engine-badge">CORE: GROUNDED ASSISTANT</span>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <span class="badge badge-live" id="comp-auth-status-badge">ADMIN: AUTHENTICATED</span>
+            <span class="badge badge-subtle" id="comp-face-status-badge">FACE VERIFICATION: SEPARATED</span>
+            <span class="badge badge-live" id="comp-chat-engine-badge">CORE: OLLAMA LLM</span>
             <span class="badge badge-subtle" id="comp-chat-forward-badge">USB SERIAL: COM5</span>
           </div>
         </div>
 
         <div class="card-body chat-card-body">
-          <div class="chat-quick-queries">
-            <span class="quick-label">PROMPTS FOR ATLAS COMPANION:</span>
-            <button type="button" class="btn btn-xs btn-chip" data-companion-prompt="Who is currently inside?">Who is currently inside?</button>
-            <button type="button" class="btn btn-xs btn-chip" data-companion-prompt="What do you see right now?">What do you see right now?</button>
-            <button type="button" class="btn btn-xs btn-chip" data-companion-prompt="Is the perimeter secure?">Is perimeter secure?</button>
-            <button type="button" class="btn btn-xs btn-chip" data-companion-prompt="What happened today?">What happened today?</button>
-            <button type="button" class="btn btn-xs btn-chip" data-companion-prompt="Say hello to Priya!">Say hello to Priya!</button>
-          </div>
-
           <div class="chat-messages-container" id="companion-chat-messages" style="min-height: 280px;">
             <div class="chat-message chat-message-assistant">
               <div class="chat-msg-header">
-                <span class="chat-sender">ATLAS COMPANION</span>
-                <span class="badge badge-live" style="font-size: 9px;">READY ON COM5</span>
+                <span class="chat-sender">ATLAS</span>
+                <div class="chat-companion-meta" style="display: flex; gap: 8px; align-items: center;">
+                  <span class="badge badge-subtle" style="font-size: 9px;">Emotion: <strong style="color: #38bdf8;">NEUTRAL</strong></span>
+                  <span class="badge badge-live" style="font-size: 9px;">Robot: <strong style="color: #22c55e;">IDLE</strong></span>
+                </div>
               </div>
               <div class="chat-msg-body">
-                Hello Administrator! The physical ATLAS Home Companion is synchronized via USB serial COM5 at 921,600 baud. Ask me any question about the house, observed people, or perimeter safety, and I will speak and react in real-time.
+                Hello! I am ATLAS, your physical home companion. I am powered by local Ollama intelligence and synchronized with hardware.
               </div>
             </div>
           </div>
 
           <form class="chat-input-row" id="companion-chat-form">
-            <input type="text" id="companion-chat-input" class="form-control chat-input" placeholder="Type a message or safety inquiry to speak through the physical ATLAS robot..." autocomplete="off" />
-            <button type="submit" class="btn btn-primary" id="btn-companion-chat-send">
-              <span>🗣️</span> TALK TO ATLAS
+            <input type="text" id="companion-chat-input" class="form-control chat-input" placeholder="Type a message..." autocomplete="off" />
+            <button type="button" class="btn btn-secondary btn-mic" id="btn-companion-mic" title="Voice Input: Speak to ATLAS" style="padding: 0 14px;">
+              <span id="companion-mic-icon" style="font-size: 16px;">🎤</span>
+              <span id="companion-mic-status" class="mic-status-label" style="display: none;">IDLE</span>
+            </button>
+            <button type="submit" class="btn btn-primary" id="btn-companion-chat-send" style="padding: 0 20px; font-weight: 700; letter-spacing: 0.05em;">
+              <span>SEND</span>
             </button>
           </form>
+          <div id="companion-voice-feedback" style="display: none; margin-top: 8px;"></div>
         </div>
       </section>
 
@@ -951,6 +994,7 @@
           
           <div class="face-actions-row">
             <button class="btn btn-outline" id="btn-back-to-credentials" type="button">← BACK</button>
+            <button class="btn btn-secondary" id="btn-re-enroll-face" type="button" title="Enroll or update your face template using the live camera feed">📸 RE-ENROLL FACE</button>
             <button class="btn btn-primary" id="btn-capture-face" type="button">CAPTURE & VERIFY FACE</button>
           </div>
         </div>

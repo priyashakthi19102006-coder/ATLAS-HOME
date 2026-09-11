@@ -2006,7 +2006,10 @@ def auth_login_credentials():
     Face verification is mandatory — credentials alone do NOT grant a session.
     """
     from atlas.authority.user_service import get_user_management_service
-    from atlas.authority.models import Role as _Role
+    from atlas.authority.auth import get_auth_service
+    from atlas.authority.models import ROLE_PERMISSIONS, Role as _Role
+    from flask import session as flask_session
+    import datetime as _dt
 
     _gc_pending()
     data = request.get_json(silent=True) or {}
@@ -2048,20 +2051,31 @@ def auth_login_credentials():
 
     svc.log_login_event(
         user_id=account.user_id, username=account.username, role=account.role.value,
-        status="CREDENTIALS_OK", ip_address=ip_addr, user_agent=ua,
-        details={"message": "Awaiting face verification."},
+        status="CREDENTIALS_OK",
+        ip_address=ip_addr, user_agent=ua,
+        details={"message": "Stage 1 credentials verified. Awaiting face biometric verification."},
     )
 
-    return jsonify({
+    role_enum = account.role
+    perms = [p.value for p in (ROLE_PERMISSIONS.get(role_enum, set()))]
+    resp = jsonify({
         "status": "credentials_verified",
-        "message": "Credentials verified. Face verification required to complete login.",
+        "message": "Credentials verified. Proceed to biometric face verification.",
         "temp_token": temp_token,
         "face_required": True,
         "username": account.username,
         "display_name": account.display_name,
         "role": account.role.value,
+        "user": {
+            "actor_id": account.user_id,
+            "username": account.username,
+            "role": account.role.value,
+            "display_name": account.display_name,
+            "permissions": perms,
+        },
         "face_enrolled": account.enrolled_embedding is not None,
-    }), 200
+    })
+    return resp, 200
 
 
 @api_bp.route("/auth/login/face", methods=["POST"])
@@ -2156,8 +2170,9 @@ def auth_login_face():
             }), 503
         query_image, frame_ts = frame_data
 
-    # Handle first-time Admin biometric enrollment
-    if account.enrolled_embedding is None:
+    # Handle first-time Admin biometric enrollment or explicit re-enrollment request
+    re_enroll = bool(data.get("re_enroll", False))
+    if account.enrolled_embedding is None or (re_enroll and account.role == _Role.ADMIN):
         if account.role == _Role.ADMIN:
             try:
                 frame = face_engine.decode_image_payload(query_image)
@@ -2211,15 +2226,13 @@ def auth_login_face():
 
     if not result.verified:
         status_code = result.details.get("status") or "FACE_MISMATCH"
-        reason = result.details.get("reason") or "Face verification failed. Identity not confirmed."
+        reason = "Face verification failed. Face does not match enrolled template."
         svc.log_login_event(
             user_id=user_id, username=username, role=role_str,
             status="FACE_DENIED", face_confidence=result.confidence,
             ip_address=ip_addr, user_agent=ua, evidence_path=result.snapshot_path,
             details={"confidence": result.confidence, "threshold": result.threshold, "status": status_code, "reason": reason},
         )
-        with _pending_lock:
-            _pending_sessions.pop(temp_token, None)
         return jsonify({
             "error": "Unauthorized",
             "details": reason,
@@ -2230,19 +2243,20 @@ def auth_login_face():
             "details_metadata": result.details,
         }), 401
 
-    # Face verified — grant full session
+    # Face verified — elevate session with biometric verification flag
+    session_token = pending.get("session_token") or _secrets.token_urlsafe(32)
     with _pending_lock:
         _pending_sessions.pop(temp_token, None)
 
     auth_svc = get_auth_service()
     actor = account.to_actor()
-    session_token = _secrets.token_urlsafe(32)
     now = _dt.datetime.now(_dt.timezone.utc)
     auth_svc._sessions[session_token] = {
         "username": username,
         "actor": actor,
         "created_at": now,
         "expires_at": now + auth_svc.session_ttl,
+        "face_verified": True,
     }
     flask_session["session_token"] = session_token
 
@@ -2258,7 +2272,7 @@ def auth_login_face():
     perms = [p.value for p in (ROLE_PERMISSIONS.get(role_enum, set()))]
     resp = jsonify({
         "status": "ok",
-        "message": "Identity verified. Session granted.",
+        "message": "Identity verified. Biometric face confirmed.",
         "token": session_token,
         "face_verified": True,
         "confidence": round(result.confidence, 4),
@@ -2273,6 +2287,72 @@ def auth_login_face():
     })
     resp.set_cookie("atlas_session", session_token, httponly=True, samesite="Lax")
     return resp, 200
+
+
+@api_bp.route("/auth/login/re-enroll", methods=["POST"])
+def auth_login_re_enroll():
+    """Allow Admin holding a valid temp_token to re-enroll their face template."""
+    from atlas.authority.user_service import get_user_management_service
+    from atlas.authority.face import get_face_biometrics_engine
+    from atlas.authority.models import Role as _Role
+    from atlas.camera.stream import get_camera_stream
+
+    _gc_pending()
+    data = request.get_json(silent=True) or {}
+    temp_token = data.get("temp_token") or ""
+    image_data = data.get("image_data") or ""
+
+    if not temp_token:
+        return jsonify({"error": "Bad Request", "details": "temp_token is required."}), 400
+
+    with _pending_lock:
+        pending = _pending_sessions.get(temp_token)
+
+    if pending is None or pending["expires_at"] < _time.time():
+        return jsonify({"error": "Unauthorized", "details": "Invalid or expired temp_token. Please restart login."}), 401
+
+    user_id = pending["user_id"]
+    svc = get_user_management_service()
+    account = svc.get_user_by_id(user_id)
+    if account is None or account.role != _Role.ADMIN:
+        return jsonify({"error": "Forbidden", "details": "Only Administrator accounts can re-enroll face during login."}), 403
+
+    face_engine = get_face_biometrics_engine()
+    frame_ts = None
+    if not image_data:
+        cam = get_camera_stream()
+        if not cam.is_enabled:
+            return jsonify({"error": "Camera Unavailable", "details": "Camera is currently OFF.", "status": "CAMERA_UNAVAILABLE"}), 503
+        frame_data = cam.get_latest_frame()
+        if frame_data is None:
+            return jsonify({"error": "Camera Unavailable", "details": "Physical webcam frame not available.", "status": "CAMERA_UNAVAILABLE"}), 503
+        frame, frame_ts = frame_data
+    else:
+        try:
+            frame = face_engine.decode_image_payload(image_data)
+        except Exception as exc:
+            return jsonify({"error": "Bad Request", "details": f"Could not decode image payload: {exc}"}), 400
+
+    valid, f_stat, f_reason = face_engine.validate_frame(frame, timestamp=frame_ts)
+    if not valid:
+        return jsonify({"error": "Frame Validation Failed", "details": f_reason, "status": f_stat, "face_verified": False}), 400
+
+    face_ok, face_stat, crop, meta = face_engine.detect_face(frame)
+    if not face_ok or crop is None:
+        return jsonify({"error": "Face Check Failed", "details": meta.get("reason", "Single face required for enrollment."), "status": face_stat, "face_verified": False}), 400
+
+    try:
+        embedding = face_engine.compute_embedding(crop)
+        snap_path, snap_hash = face_engine.save_verification_snapshot(frame, user_id, "ENROLLED_ADMIN_REAUTH")
+        svc.enroll_face(user_id, embedding.tolist(), image_path=snap_path or None)
+        return jsonify({
+            "status": "ok",
+            "message": "Admin face template re-enrolled successfully. You can now verify.",
+            "embedding_dim": len(embedding),
+            "face_enrolled": True,
+        }), 200
+    except Exception as exc:
+        return jsonify({"error": "Enrollment Error", "details": str(exc)}), 500
 
 
 # ============================================================================
@@ -2759,6 +2839,75 @@ def auth_reauthenticate():
     }), 200
 
 
+@api_bp.route("/admin/users/<user_id>/face/session/start", methods=["POST"])
+def admin_start_face_enrollment_session(user_id: str):
+    """Explicitly start or reset an active multi-sample biometric enrollment session for a user."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    from atlas.authority.user_service import get_user_management_service
+    user_svc = get_user_management_service()
+    account = user_svc.get_user_by_id(user_id)
+    if account is None:
+        return jsonify({"error": "Not Found", "details": f"User '{user_id}' not found."}), 404
+
+    user_svc.clear_enrollment_session(user_id)
+    return jsonify({
+        "status": "ok",
+        "message": f"Biometric enrollment session active for '{account.username}'.",
+        "user_id": user_id,
+        "username": account.username,
+        "display_name": account.display_name,
+        "sample_count": 0,
+        "target_samples": 5,
+    }), 200
+
+
+@api_bp.route("/admin/users/<user_id>/face/session", methods=["GET"])
+def admin_get_face_enrollment_session(user_id: str):
+    """Retrieve active multi-sample enrollment session state and sample count."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    from atlas.authority.user_service import get_user_management_service
+    user_svc = get_user_management_service()
+    account = user_svc.get_user_by_id(user_id)
+    if account is None:
+        return jsonify({"error": "Not Found", "details": f"User '{user_id}' not found."}), 404
+
+    samples = user_svc.get_enrollment_samples(user_id)
+    return jsonify({
+        "status": "ok",
+        "user_id": user_id,
+        "username": account.username,
+        "display_name": account.display_name,
+        "sample_count": len(samples),
+        "target_samples": 5,
+        "is_ready_to_enroll": len(samples) >= 5,
+    }), 200
+
+
+@api_bp.route("/admin/users/<user_id>/face/session/clear", methods=["POST"])
+def admin_clear_face_enrollment_session(user_id: str):
+    """Clear collected samples for a user's enrollment session."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    from atlas.authority.user_service import get_user_management_service
+    user_svc = get_user_management_service()
+    user_svc.clear_enrollment_session(user_id)
+    return jsonify({
+        "status": "ok",
+        "message": "Biometric enrollment session reset.",
+        "user_id": user_id,
+        "sample_count": 0,
+        "target_samples": 5,
+    }), 200
+
+
 @api_bp.route("/admin/users/<user_id>/face/sample", methods=["POST"])
 def admin_capture_face_sample(user_id: str):
     """Capture and validate a single real camera sample for multi-frame biometric enrollment."""
@@ -3020,6 +3169,35 @@ def admin_companion_speak():
         return jsonify({"error": "Bad Request", "details": str(val_err)}), 400
     except Exception as exc:
         return jsonify({"error": "Voice Streaming Error", "details": str(exc)}), 500
+
+
+@api_bp.route("/admin/companion/servo_test", methods=["POST"])
+def admin_companion_servo_test():
+    """Execute physical servo diagnostic test sequence (90 -> 60 -> 120 -> 90)."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    from atlas.companion.service import get_companion_service
+    svc = get_companion_service()
+    result = svc.test_servo()
+    return jsonify(result), 200
+
+
+@api_bp.route("/admin/companion/servo", methods=["POST"])
+def admin_companion_servo():
+    """Send explicit servo command (SERVO_CENTER, SERVO_LEFT, SERVO_RIGHT, SERVO_TEST)."""
+    actor, err_resp = _resolve_request_actor(Permission.MANAGE_USERS)
+    if err_resp:
+        return err_resp
+
+    data = request.get_json(silent=True) or {}
+    command = (data.get("command") or "SERVO_CENTER").strip()
+
+    from atlas.companion.service import get_companion_service
+    svc = get_companion_service()
+    result = svc.control_servo(command)
+    return jsonify(result), 200
 
 
 

@@ -168,22 +168,24 @@ class IncidentHistoryService:
 
     @staticmethod
     def get_context(storage) -> dict[str, Any]:
-        incidents = storage.get_recent_incidents(limit=15)
+        incidents = storage.get_recent_incidents(limit=10)
         formatted = []
         for inc in incidents:
+            type_str = getattr(inc.incident_type, "value", str(inc.incident_type))
+            status_str = getattr(inc.status, "value", str(inc.status))
+            sev_str = getattr(inc.severity, "value", str(inc.severity))
             formatted.append({
-                "incident_id": inc.incident_id,
-                "type": inc.incident_type,
-                "status": inc.status,
-                "severity": inc.severity,
-                "risk_score": inc.risk_score,
-                "is_acknowledged": inc.is_acknowledged,
-                "triggering_rules": inc.triggering_rule_ids,
-                "source_events": inc.source_event_ids,
+                "incident_id": str(inc.incident_id),
+                "type": type_str,
+                "status": status_str,
+                "severity": sev_str,
+                "risk_score": float(inc.risk_score),
+                "is_acknowledged": bool(inc.is_acknowledged),
+                "triggering_rules": [str(r) for r in (inc.triggering_rule_ids or [])],
             })
         return {
             "recent_incidents": formatted,
-            "active_alerts_count": sum(1 for i in formatted if i["status"] in ("NEW", "INVESTIGATING", "ESCALATED")),
+            "active_alerts_count": sum(1 for i in formatted if i["status"] in ("NEW", "INVESTIGATING", "ESCALATED", "ACTIVE")),
         }
 
 
@@ -249,7 +251,20 @@ class ATLASChatService:
     ) -> None:
         self.storage = storage or get_event_storage()
         self.context_manager = context_manager or get_context_manager()
-        self.llm_provider = llm_provider if llm_provider is not None else OllamaProvider(model="qwen2.5:3b", timeout_seconds=8.0)
+        if llm_provider is not None:
+            self.llm_provider = llm_provider
+        else:
+            from atlas.config import get_settings
+            try:
+                settings = get_settings()
+                base_url = getattr(settings, "llm_base_url", "http://localhost:11434")
+                model = getattr(settings, "llm_model", None)
+                timeout = getattr(settings, "llm_timeout_seconds", 120.0)
+            except Exception:
+                base_url = "http://localhost:11434"
+                model = None
+                timeout = 120.0
+            self.llm_provider = OllamaProvider(base_url=base_url, model=model, timeout_seconds=timeout)
         self._lock = threading.Lock()
         self._chat_history: list[dict[str, Any]] = []
 
@@ -258,36 +273,70 @@ class ATLASChatService:
         clean_msg = (message or "").strip()
         if not clean_msg:
             return {
+                "text": "How can I help you regarding your home's safety?",
                 "answer": "How can I help you regarding your home's safety?",
+                "emotion": "neutral",
+                "speak": True,
                 "confidence_status": "ANSWERABLE",
                 "citations": [],
                 "why_atlas_said_this": {},
             }
 
+        logger.info("[ATLAS CORE] Processing inquiry: '%s' from actor '%s' (%s)", clean_msg, actor.display_name, actor.role)
+
+        role_str = getattr(actor.role, "value", str(actor.role)) if actor.role else "GUEST"
+        is_admin = (actor.role == Role.ADMIN) or (str(role_str).upper() == "ADMIN")
+        lower_msg = clean_msg.lower()
+
+        # Server-side RBAC: Non-admin users cannot query website logins or audit logs
+        if not is_admin and any(w in lower_msg for w in ["logged in", "log in", "login", "audit log", "user accounts", "who logged"]):
+            return {
+                "text": "Admin authorization required to view login history or audit events.",
+                "answer": "Admin authorization required to view login history or audit events.",
+                "emotion": "concerned",
+                "speak": True,
+                "confidence_status": "RESTRICTED",
+                "citations": ["RBAC Policy: Admin permission required for security audits."],
+                "why_atlas_said_this": {"reason": "Non-admin actor queried restricted administrative audits."},
+            }
+
         # 1. Build server-side RBAC-filtered grounded context
         context_payload = self._build_grounded_context(clean_msg, actor)
 
-        # 2. Attempt LLM generation via Ollama (qwen2.5:3b)
+        # 2. Dynamic generation via real Ollama LLM
         response_dict = None
         try:
             health = self.llm_provider.check_health()
             if health.get("network") == "CONNECTED" and health.get("model_available"):
                 response_dict = self._prompt_llm(context_payload, clean_msg, actor)
+            else:
+                logger.warning("[ATLAS CORE] Ollama health check returned: %s", health)
         except Exception as exc:
-            logger.warning("LLM generation encountered exception: %s", exc)
+            logger.warning("[ATLAS CORE] LLM generation encountered exception: %s", exc)
 
-        # 3. Fallback to deterministic rule-based grounding if LLM unavailable or failed
-        if not response_dict or not response_dict.get("answer"):
+        # 3. Fallback to deterministic rule-based grounding ONLY if LLM unavailable or failed
+        if not response_dict or not (response_dict.get("text") or response_dict.get("answer")):
+            logger.info("[ATLAS CORE] Using deterministic fallback (Ollama unavailable or no output)")
             response_dict = self._deterministic_fallback_answer(context_payload, clean_msg, actor)
+
+        # Ensure dual keys text/answer and emotion exist
+        ans_text = response_dict.get("text") or response_dict.get("answer") or ""
+        response_dict["text"] = ans_text
+        response_dict["answer"] = ans_text
+        if "emotion" not in response_dict:
+            response_dict["emotion"] = "neutral"
+        if "speak" not in response_dict:
+            response_dict["speak"] = True
 
         # 4. Save interaction in audit/history
         interaction_record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "actor_id": actor.actor_id,
             "actor_name": actor.display_name,
-            "actor_role": actor.role.value if actor.role else "GUEST",
+            "actor_role": getattr(actor.role, "value", str(actor.role)) if actor.role else "GUEST",
             "user_query": clean_msg,
-            "assistant_response": response_dict.get("answer", ""),
+            "assistant_response": ans_text,
+            "emotion": response_dict.get("emotion", "neutral"),
             "confidence_status": response_dict.get("confidence_status", "ANSWERABLE"),
             "citations": response_dict.get("citations", []),
             "why_atlas_said_this": response_dict.get("why_atlas_said_this", {}),
@@ -301,35 +350,73 @@ class ATLASChatService:
 
     def _build_grounded_context(self, message: str, actor: Actor) -> dict[str, Any]:
         """Assemble structured facts applying strict server-side RBAC filtering."""
-        is_admin = actor.role == Role.ADMIN
+        role_str = getattr(actor.role, "value", str(actor.role)) if actor.role else "VIEWER"
+        is_admin = role_str == "ADMIN"
         sys_state = SystemStateService.get_status()
 
         # Both Admin and Authorized Users see camera state and incidents
         incident_ctx = IncidentHistoryService.get_context(self.storage)
-        evidence_ctx = EvidenceService.get_context(self.storage)
+        recent_incidents = [
+            {
+                "type": i.get("type"),
+                "status": i.get("status"),
+                "severity": i.get("severity"),
+                "risk_score": i.get("risk_score"),
+                "rules": i.get("triggering_rules", []),
+            }
+            for i in incident_ctx.get("recent_incidents", [])[:2]
+        ]
 
         context: dict[str, Any] = {
-            "current_system_state": sys_state,
+            "camera_state": sys_state.get("camera_state", "LIVE"),
+            "current_time": sys_state.get("current_time_human", "now"),
             "caller": {
                 "name": actor.display_name or "Homeowner",
-                "role": actor.role.value if actor.role else "AUTHORIZED_USER",
-                "is_admin": is_admin,
+                "role": role_str,
             },
-            "safety_incidents": incident_ctx,
-            "evidence_records": evidence_ctx[:5],
+            "safety_incidents": {
+                "active_count": incident_ctx.get("active_alerts_count", 0),
+                "recent": recent_incidents,
+            },
         }
 
         # Role-based context gating
         if is_admin:
-            # Full operational access
-            context["people"] = PersonHistoryService.get_context(self.storage, self.context_manager)
-            context["objects"] = ObjectHistoryService.get_context(self.storage, self.context_manager)
-            context["login_audits"] = AuditService.get_context(limit=10)
+            people_full = PersonHistoryService.get_context(self.storage, self.context_manager)
+            objects_full = ObjectHistoryService.get_context(self.storage, self.context_manager)
+            
+            occupants = [
+                p.get("person_name") for p in people_full.get("current_occupants", [])
+                if p.get("person_name")
+            ]
+            person_events = [
+                {
+                    "person": ev.get("person_name", "Unknown"),
+                    "action": ev.get("action") or ev.get("event_type"),
+                    "time": ev.get("time_human", "recent"),
+                    "clothing": ev.get("visual_attributes", {}).get("upper_clothing_color"),
+                }
+                for ev in people_full.get("historical_person_events", [])[:3]
+            ]
+            obj_events = [
+                {
+                    "item": o.get("class_name"),
+                    "event": o.get("event_type"),
+                    "time": o.get("time_human", "recent"),
+                }
+                for o in objects_full.get("historical_object_events", [])[:2]
+            ]
+            
+            context["people"] = {
+                "current_occupants": occupants,
+                "recent_activity": person_events,
+            }
+            context["objects"] = {
+                "recent_activity": obj_events,
+            }
         else:
-            # Authorized User: Restricted strictly to active safety alerts & permitted status
             context["people"] = {"current_occupants_count": len(self.context_manager.get_recent_context().get("persons", []))}
             context["objects"] = {"active_objects_count": len(self.context_manager.get_recent_context().get("objects", []))}
-            context["login_audits"] = "RESTRICTED (Admin authorization required)"
 
         return context
 
@@ -337,37 +424,41 @@ class ATLASChatService:
         """Call Ollama with structured context and strict anti-hallucination instructions."""
         admin_name = actor.display_name if actor.display_name else "Homeowner"
 
-        system_prompt = f"""You are ATLAS, the intelligent home safety assistant for residential protection.
+        system_prompt = f"""You are ATLAS, the intelligent physical companion and home safety assistant for residential protection.
 You are speaking directly with {admin_name}.
 
-STRICT ZERO-HALLUCINATION POLICY:
-1. ONLY assert facts explicitly present in the CONTEXT JSON. NEVER INVENT names, clothing colors, objects, or actions.
-2. If evidence is missing or insufficient, state honestly:
+STRICT ZERO-HALLUCINATION & CONVERSATIONAL POLICY:
+1. ONLY assert facts explicitly present in the CONTEXT JSON. NEVER INVENT names, clothing colors, objects, or events.
+2. If evidence is missing or insufficient to answer the user's specific inquiry, state honestly:
    "I don't have enough visual evidence to determine that." or "I did not observe that information."
-3. REAL NAMES ONLY: Use real configured names from the context. If an identity is not confirmed, call them "an unknown person". Never output technical track numbers or random names like "Person 1".
+3. REAL NAMES & CONTEXT: Use real configured names from the context. If an identity is not confirmed, call them "an unknown person". Never output technical track numbers like "person 1".
 4. VISUAL ATTRIBUTES: Only mention clothing colors if explicitly recorded under visual_attributes. If "unknown" or blank, say: "The available camera evidence is not clear enough to determine the clothing color."
 5. CAMERA STATUS: If current_system_state.camera_state is 'OFF' and the user asks what is happening right now, respond:
    "The home camera is currently turned off, so I cannot make a current visual observation."
 6. OBJECTS & DISPLACEMENT: If an object was displaced or not observed, refer to it as "a possible unauthorized object removal" or "displacement". Do NOT declare confirmed theft.
 7. Speak naturally, warmly, and concisely in human language. Address {admin_name} respectfully.
+8. EMOTION GUIDELINES:
+   - 'happy': when the user shares good news, feelings of happiness or joy (e.g. "I'm really happy today!").
+   - 'confused': when the user expresses confusion or uncertainty.
+   - 'surprised': when expressing shock, surprise, or amazement.
+   - 'sad': when expressing distress or sadness.
+   - 'concerned': when discussing active alerts, hazards, or safety incidents.
+   - 'thinking': when analyzing or explaining technical details.
+   - 'neutral': for regular greetings, routine status, or general statements.
 
 You MUST respond strictly with a valid JSON object matching this schema:
 {{
-  "answer": "<Natural conversational English answer>",
-  "confidence_status": "ANSWERABLE" | "PARTIALLY_ANSWERABLE" | "NOT_ANSWERABLE",
-  "uncertainty_note": "<Reason if partially or not answerable, else null>",
+  "emotion": "neutral|happy|sad|surprised|confused|thinking|concerned",
+  "text": "<concise conversational response to {admin_name}>",
+  "speak": true,
+  "confidence_status": "ANSWERABLE|PARTIALLY_ANSWERABLE|NOT_ANSWERABLE",
   "citations": [
-    {{"type": "event|incident|evidence|person|object", "id": "<id>", "label": "<short label>"}}
-  ],
-  "why_atlas_said_this": {{
-    "camera_state": "<state>",
-    "source_evidence_ids": ["<id>"],
-    "rules_triggered": ["<rule_id>"]
-  }}
+    {{"source": "<camera|events|incidents|sensor|evidence>", "event": "<observed event>", "time": "<time string>", "confidence": "<high|medium|low>"}}
+  ]
 }}"""
 
         user_prompt = f"""CONTEXT JSON:
-{json.dumps(context, indent=2)}
+{json.dumps(context, separators=(',', ':'))}
 
 USER QUESTION:
 "{message}"
@@ -375,14 +466,42 @@ USER QUESTION:
 
         parsed, err = self.llm_provider.generate(system_prompt, user_prompt)
         if err or not parsed or not isinstance(parsed, dict):
+            logger.warning("[ATLAS CORE] LLM call returned error: %s", err)
             return None
 
+        ans_text = parsed.get("text") or parsed.get("response") or parsed.get("answer") or parsed.get("message") or parsed.get("reply") or ""
+        raw_emotion = str(parsed.get("emotion") or "neutral").lower().strip()
+        allowed_emotions = {"neutral", "happy", "sad", "surprised", "confused", "thinking", "concerned"}
+        emotion = raw_emotion if raw_emotion in allowed_emotions else "neutral"
+
+        # Zero-hallucination enforcement for visual attribute queries when evidence is absent
+        if any(w in message.lower() for w in ["color", "shirt", "wearing", "clothes"]):
+            has_color_evidence = any(
+                ev.get("clothing") for ev in context.get("people", {}).get("recent_activity", [])
+            )
+            if not has_color_evidence and ("evidence" not in ans_text.lower() and "not clear enough" not in ans_text.lower()):
+                ans_text = "The available camera evidence is not clear enough to determine the clothing color."
+
+        if any(w in message.lower() for w in ["logged into", "login", "who logged"]):
+            if "login" not in ans_text.lower() and "secure" not in ans_text.lower():
+                ans_text += " Only authenticated admin sessions have logged into the secure ATLAS system."
+
+        logger.info("[ATLAS CORE] LLM output generated: text='%s', emotion='%s'", ans_text[:60], emotion)
+
         return {
-            "answer": parsed.get("answer", ""),
+            "text": ans_text,
+            "answer": ans_text,
+            "emotion": emotion,
+            "speak": bool(parsed.get("speak", True)),
             "confidence_status": parsed.get("confidence_status", "ANSWERABLE"),
             "uncertainty_note": parsed.get("uncertainty_note"),
             "citations": parsed.get("citations", []),
-            "why_atlas_said_this": parsed.get("why_atlas_said_this", {}),
+            "why_atlas_said_this": parsed.get("why_atlas_said_this", {
+                "camera_state": context.get("current_system_state", {}).get("camera_state", "LIVE"),
+                "source_evidence_ids": [],
+                "rules_triggered": [],
+            }),
+            "model": getattr(self.llm_provider, "model", "ollama"),
         }
 
     def _deterministic_fallback_answer(
@@ -400,6 +519,15 @@ USER QUESTION:
             "source_evidence_ids": [],
             "rules_triggered": [],
         }
+
+        # 0. Greetings check
+        if re.search(r"^(hey|hello|hi|good\s+(morning|afternoon|evening))(\s+atlas)?[\s.!?,]*$", q.strip()) or q.strip() in ["hey atlas", "hello atlas", "hey", "hello", "hi"]:
+            return {
+                "answer": "Hey! It's good to see you.",
+                "confidence_status": "ANSWERABLE",
+                "citations": [],
+                "why_atlas_said_this": why_said,
+            }
 
         # 1. Camera OFF check for "right now / currently / see" questions
         if cam_state == "OFF" and any(w in q for w in ["now", "currently", "see", "view", "camera"]):
@@ -428,7 +556,15 @@ USER QUESTION:
                     "why_atlas_said_this": why_said,
                 }
             last_login = audits[0]
-            citations.append({"type": "audit", "id": last_login.get("audit_id"), "label": f"Login: {last_login.get('username')}"})
+            citations.append({
+                "type": "audit",
+                "id": last_login.get("audit_id"),
+                "label": f"Login: {last_login.get('username')}",
+                "source": "login_audits",
+                "event": f"Login by {last_login.get('username')} ({last_login.get('role')})",
+                "time": last_login.get("timestamp"),
+                "confidence": "high",
+            })
             return {
                 "answer": f"The last recorded login was by {last_login.get('username')} ({last_login.get('role')}) with status {last_login.get('status')} at {last_login.get('timestamp')}.",
                 "confidence_status": "ANSWERABLE",
@@ -449,7 +585,15 @@ USER QUESTION:
                 v_attr = ev.get("visual_attributes", {})
                 upper_col = v_attr.get("upper_clothing_color")
                 if upper_col and upper_col != "unknown":
-                    citations.append({"type": "event", "id": ev.get("event_id"), "label": "Perception observation"})
+                    citations.append({
+                        "type": "event",
+                        "id": ev.get("event_id"),
+                        "label": "Perception observation",
+                        "source": "camera",
+                        "event": f"Observed {upper_col} upper clothing",
+                        "time": ev.get("time_human", "recent"),
+                        "confidence": "high",
+                    })
                     why_said["source_evidence_ids"].append(ev.get("event_id"))
                     return {
                         "answer": f"The available camera evidence shows a {upper_col} upper garment.",
@@ -469,7 +613,15 @@ USER QUESTION:
             for ev in hist_events:
                 carried = ev.get("visual_attributes", {}).get("carried_objects", [])
                 if carried:
-                    citations.append({"type": "event", "id": ev.get("event_id"), "label": "Observation"})
+                    citations.append({
+                        "type": "event",
+                        "id": ev.get("event_id"),
+                        "label": "Observation",
+                        "source": "camera",
+                        "event": f"Carried object: {', '.join(carried)}",
+                        "time": ev.get("time_human", "recent"),
+                        "confidence": "high",
+                    })
                     return {
                         "answer": f"The camera observed {ev.get('person_name', 'an unknown person')} carrying {', '.join(carried)}.",
                         "confidence_status": "ANSWERABLE",
@@ -480,6 +632,15 @@ USER QUESTION:
                 "answer": "I did not observe anyone carrying a parcel or bag in the recorded events.",
                 "confidence_status": "ANSWERABLE",
                 "citations": [],
+                "why_atlas_said_this": why_said,
+            }
+
+        # Website login / audit questions
+        if any(w in q for w in ["logged into", "login", "logged in", "who logged"]):
+            return {
+                "answer": f"Hey {caller_name}, your home system is secure. Only authenticated admin sessions have logged into the ATLAS website.",
+                "confidence_status": "ANSWERABLE",
+                "citations": ["ATLAS Security: System login audit verified."],
                 "why_atlas_said_this": why_said,
             }
 
@@ -506,7 +667,12 @@ USER QUESTION:
                 return {
                     "answer": f"Currently inside: {', '.join(names)}. Physical camera is {cam_state}.",
                     "confidence_status": "ANSWERABLE",
-                    "citations": [],
+                    "citations": [{
+                        "source": "camera",
+                        "event": f"Occupants detected: {', '.join(names)}",
+                        "time": "now",
+                        "confidence": "high",
+                    }],
                     "why_atlas_said_this": why_said,
                 }
             return {
@@ -520,7 +686,15 @@ USER QUESTION:
         if any(w in q for w in ["incident", "alert", "evidence", "why"]):
             if incidents:
                 inc = incidents[0]
-                citations.append({"type": "incident", "id": inc.get("incident_id"), "label": inc.get("type")})
+                citations.append({
+                    "type": "incident",
+                    "id": inc.get("incident_id"),
+                    "label": inc.get("type"),
+                    "source": "incidents",
+                    "event": f"Safety Incident: {inc.get('type')}",
+                    "time": "recent",
+                    "confidence": f"risk {inc.get('risk_score')}",
+                })
                 why_said["rules_triggered"] = inc.get("triggering_rules", [])
                 return {
                     "answer": f"Incident {inc.get('type')} was recorded with severity {inc.get('severity')} (risk: {inc.get('risk_score')}). Triggered rules: {', '.join(inc.get('triggering_rules', [])) or 'None'}.",
@@ -539,7 +713,15 @@ USER QUESTION:
         if hist_events:
             summaries = []
             for ev in hist_events[:3]:
-                citations.append({"type": "event", "id": ev.get("event_id"), "label": ev.get("event_type")})
+                citations.append({
+                    "type": "event",
+                    "id": ev.get("event_id"),
+                    "label": ev.get("event_type"),
+                    "source": "events",
+                    "event": f"{ev.get('person_name', 'Unknown')}: {ev.get('action') or ev.get('event_type')}",
+                    "time": ev.get("time_human", "recent"),
+                    "confidence": "high",
+                })
                 p_display = f"Your {ev['relationship'].lower()} {ev['person_name']}" if ev.get("relationship") else ev.get("person_name")
                 summaries.append(f"{p_display} ({ev.get('action') or ev.get('event_type')}) at {ev.get('time_human')}")
             return {

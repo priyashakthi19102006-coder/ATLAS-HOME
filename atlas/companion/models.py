@@ -18,6 +18,7 @@ class CompanionState(str, Enum):
     SAD = "Sad"
     SURPRISED = "Surprised"
     CONFUSED = "Confused"
+    CONCERNED = "Concerned"
 
 
 class CompanionActivity(BaseModel):
@@ -35,6 +36,8 @@ class CompanionStatus(BaseModel):
     port: str = "COM5"
     baudrate: int = 921600
     state: CompanionState = CompanionState.IDLE
+    affective_state: str = "Idle"
+    robot_state: str = "Idle"
     bytes_sent: int = 0
     bytes_received: int = 0
     packets_sent: int = 0
@@ -46,4 +49,6 @@ class CompanionStatus(BaseModel):
     last_error: Optional[str] = None
     firmware_banner: Optional[str] = None
     active_task: Optional[str] = None
+    ollama_online: bool = False
+    ollama_model: Optional[str] = None
     recent_activities: list[CompanionActivity] = Field(default_factory=list)

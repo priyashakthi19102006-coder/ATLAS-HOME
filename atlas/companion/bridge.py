@@ -98,12 +98,39 @@ class CompanionSerialBridge:
         """Update companion operational or affective state and send command to ESP32."""
         self.current_state = state
         self.log_activity("SYS", "STATE_CHANGE", f"State transitioned to {state.value}")
-        # Send state payload in dual JSON and text command format
+        
+        state_upper = state.value.upper()
         json_cmd = json.dumps({"type": "state", "state": state.value}) + "\n"
-        text_cmd = f"STATE:{state.value.upper()}\n"
-        success_json = self.queue_bytes(json_cmd.encode("utf-8"))
-        success_text = self.queue_bytes(text_cmd.encode("utf-8"))
-        return success_json or success_text
+        text_cmd = f"STATE:{state_upper}\n"
+        
+        success = self.queue_bytes(json_cmd.encode("utf-8"))
+        self.queue_bytes(text_cmd.encode("utf-8"))
+        
+        if state == CompanionState.CONCERNED:
+            # Dual dispatch for hardware firmware variants: sad/confused attentive eyes
+            self.queue_bytes(b"EMOTION_CONFUSED\n")
+            self.queue_bytes(b"STATE:CONFUSED\n")
+        return success
+
+    def send_emotion(self, emotion: str) -> bool:
+        """Explicitly send EMOTION command to companion hardware."""
+        emo_upper = emotion.strip().upper()
+        self.log_activity("OUT", "EMOTION", f"EMOTION_{emo_upper}")
+        cmd = f"EMOTION_{emo_upper}\n"
+        return self.queue_bytes(cmd.encode("utf-8"))
+
+    def send_servo_command(self, command: str) -> bool:
+        """Send explicit servo command (SERVO_CENTER, SERVO_LEFT, SERVO_RIGHT, SERVO_TEST)."""
+        cmd_clean = command.strip().upper()
+        if not cmd_clean.startswith("SERVO_"):
+            cmd_clean = f"SERVO_{cmd_clean}"
+        self.log_activity("OUT", "SERVO", cmd_clean)
+        return self.queue_bytes(f"{cmd_clean}\n".encode("utf-8"))
+
+    def send_servo_test(self) -> bool:
+        """Send explicit SERVO_TEST diagnostic command."""
+        self.log_activity("OUT", "SERVO_TEST", "SERVO_TEST")
+        return self.queue_bytes(b"SERVO_TEST\n")
 
     def send_speak(self, text: str) -> bool:
         """Forward text response to physical ESP32 companion."""
@@ -122,13 +149,15 @@ class CompanionSerialBridge:
         self.queue_bytes(json_cmd.encode("utf-8"))
         return self.queue_bytes(text_cmd.encode("utf-8"))
 
-    def send_voice_audio(self, pcm_u8: bytes, duration: float = 0.0) -> bool:
+    def send_voice_audio(self, pcm_u8: bytes, duration: float = 0.0, blocking: bool = False) -> bool:
         """Stream raw 16 kHz unsigned 8-bit PCM audio to ESP32 DAC using verified VOICE protocol.
 
         Protocol:
             VOICE\n
             <uint32 little-endian audio length>
             <raw unsigned 8-bit PCM audio>
+
+        If blocking is True, transmission and playback pacing occur synchronously on the caller's thread.
         """
         length = len(pcm_u8)
         if length == 0:
@@ -180,6 +209,10 @@ class CompanionSerialBridge:
             finally:
                 self.is_speaking = False
 
+        if blocking:
+            _stream_worker()
+            return True
+
         t = threading.Thread(target=_stream_worker, daemon=True, name="CompanionVoiceStream")
         self._last_voice_thread = t
         t.start()
@@ -199,11 +232,28 @@ class CompanionSerialBridge:
         with self._lock:
             activities = list(self._activities)
 
+        if not self.is_connected:
+            robot_st = "Offline"
+        elif self.is_speaking:
+            robot_st = "Speaking"
+        elif self.active_task and ("Processing" in self.active_task or "Thinking" in self.active_task):
+            robot_st = "Thinking"
+        elif self.current_state == CompanionState.LISTENING:
+            robot_st = "Listening"
+        elif self.current_state == CompanionState.THINKING:
+            robot_st = "Thinking"
+        elif self.current_state == CompanionState.SPEAKING:
+            robot_st = "Speaking"
+        else:
+            robot_st = "Idle"
+
         return CompanionStatus(
             connected=self.is_connected,
             port=self.port,
             baudrate=self.baudrate,
             state=self.current_state,
+            affective_state=self.current_state.value,
+            robot_state=robot_st,
             bytes_sent=self.bytes_sent,
             bytes_received=self.bytes_received,
             packets_sent=self.packets_sent,
@@ -333,6 +383,16 @@ class CompanionSerialBridge:
                     return
                 except json.JSONDecodeError:
                     pass
+
+            if "[SERVO" in text:
+                self.log_activity("IN", "SERVO", text)
+                logger.info("ESP32 Servo Confirmation: %s", text)
+                return
+
+            if "[COMMAND" in text:
+                self.log_activity("IN", "COMMAND", text)
+                logger.info("ESP32 Command Acknowledged: %s", text)
+                return
 
             # Printable ASCII log
             self.log_activity("IN", "RAW", text[:120])

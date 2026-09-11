@@ -3335,6 +3335,91 @@ body {
   border-color: #ec4899;
   box-shadow: 0 0 35px rgba(236, 72, 153, 0.4);
 }
+.state-neutral .companion-state-avatar {
+  border-color: #10b981;
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.3);
+}
+.state-concerned .companion-state-avatar {
+  border-color: #f59e0b;
+  box-shadow: 0 0 35px rgba(245, 158, 11, 0.45);
+}
+
+/* Companion Microphone Button & Voice States */
+.btn-mic {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-normal);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+.btn-mic:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--accent-cyan);
+}
+.btn-mic.mic-listening {
+  background: rgba(239, 68, 68, 0.25) !important;
+  border-color: #ef4444 !important;
+  color: #fca5a5 !important;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+  animation: mic-pulse 1.2s infinite;
+}
+.btn-mic.mic-transcribing {
+  background: rgba(234, 179, 8, 0.25) !important;
+  border-color: #eab308 !important;
+  color: #fde047 !important;
+  box-shadow: 0 0 15px rgba(234, 179, 8, 0.4);
+}
+.btn-mic.mic-sending {
+  background: rgba(56, 189, 248, 0.25) !important;
+  border-color: #38bdf8 !important;
+  color: #7dd3fc !important;
+  box-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
+}
+
+@keyframes mic-pulse {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+  70% { transform: scale(1.04); box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* Grounding Context Block in Companion Chat */
+.companion-grounding-block {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(0, 240, 255, 0.04);
+  border-left: 3px solid var(--accent-cyan);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.companion-grounding-title {
+  font-weight: 700;
+  color: var(--accent-cyan);
+  margin-bottom: 5px;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.companion-grounding-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-normal);
+  line-height: 1.5;
+}
+.companion-grounding-list li {
+  margin-bottom: 3px;
+}
 
 @keyframes pulse-ring {
   0% { transform: scale(1); }
@@ -3451,6 +3536,42 @@ body {
 .term-payload {
   color: #f1f5f9;
   word-break: break-word;
+}
+
+/* ATLAS Companion Command Interface Strip */
+.companion-command-strip {
+  background: rgba(15, 23, 42, 0.9) !important;
+  border: 1px solid rgba(56, 189, 248, 0.25) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.comp-status-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.comp-status-dot {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.chat-companion-meta {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.chat-message-assistant .chat-msg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 

@@ -9,6 +9,8 @@ from __future__ import annotations
 import abc
 import json
 import logging
+import re
+import time
 from typing import Any
 import urllib.error
 import urllib.request
@@ -245,12 +247,54 @@ class OllamaProvider(BaseLLMProvider):
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "qwen2.5:3b",
+        model: str | None = None,
         timeout_seconds: float = 120.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.model = model
         self.timeout_seconds = timeout_seconds
+        self.model: str = model.strip() if model else ""
+        # Auto-detect / verify model against Ollama
+        self.detect_model()
+
+    def detect_model(self) -> str:
+        """Inspect available Ollama models; use configured model or default to first available."""
+        endpoint = f"{self.base_url}/api/tags"
+        available_models: list[str] = []
+        try:
+            req = urllib.request.Request(endpoint, method="GET")
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                if resp.getcode() == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    for m in data.get("models", []):
+                        name = m.get("name") or m.get("model")
+                        if name:
+                            available_models.append(name)
+        except Exception as exc:
+            logger.debug("[OLLAMA] Could not query /api/tags for model discovery: %s", exc)
+
+        if available_models:
+            logger.info("[OLLAMA] Available models detected: %s", available_models)
+            # If a model was requested, check if it matches any available model
+            if self.model:
+                for candidate in available_models:
+                    if _model_matches(self.model, candidate):
+                        self.model = candidate
+                        logger.info("[OLLAMA] Configured model matched: %s", self.model)
+                        return self.model
+                logger.warning(
+                    "[OLLAMA] Configured model '%s' not in available list %s; defaulting to '%s'",
+                    self.model, available_models, available_models[0]
+                )
+                self.model = available_models[0]
+            else:
+                self.model = available_models[0]
+                logger.info("[OLLAMA] Auto-selected available model: %s", self.model)
+        else:
+            if not self.model:
+                self.model = "qwen2.5:3b"
+            logger.info("[OLLAMA] Using default model: %s", self.model)
+
+        return self.model
 
     @property
     def provider_name(self) -> str:
@@ -326,21 +370,23 @@ class OllamaProvider(BaseLLMProvider):
                 {"role": "user", "content": user_prompt},
             ],
             "stream": False,
-            "format": "json",
+            "keep_alive": "30m",
             "options": {
-                "temperature": 0.1,
-                "num_predict": 600,
+                "temperature": 0.3,
+                "num_predict": 350,
             },
         }
         headers = {
             "Content-Type": "application/json",
         }
 
+        logger.info("[OLLAMA] Dispatching chat request to %s (model: %s)", endpoint, self.model)
         _max_attempts = 2
-        _last_json_err: str | None = None
+        _last_err: str | None = None
 
         for attempt in range(1, _max_attempts + 1):
             try:
+                t0 = time.time()
                 req_data = json.dumps(payload).encode("utf-8")
                 req = urllib.request.Request(endpoint, data=req_data, headers=headers, method="POST")
                 with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
@@ -348,44 +394,77 @@ class OllamaProvider(BaseLLMProvider):
                     raw_body = resp.read().decode("utf-8")
 
                     if status_code != 200:
+                        logger.warning("[OLLAMA] HTTP error %s from Ollama endpoint", status_code)
                         return None, f"HTTP Error {status_code} from Ollama provider."
 
                     response_json = json.loads(raw_body)
                     content = response_json.get("message", {}).get("content", "")
+                    elapsed = time.time() - t0
+                    logger.info("[OLLAMA] Chat response received in %.2fs (%d bytes)", elapsed, len(content))
+
                     if not content:
                         return None, "Empty message content in Ollama response."
 
-                    parsed = extract_and_parse_json(content)
+                    # Parse JSON with safe fallback
+                    try:
+                        parsed = extract_and_parse_json(content)
+                    except Exception as parse_err:
+                        logger.warning("[OLLAMA] Output was not strict JSON (%s); applying safe fallback", parse_err)
+                        # Extract clean text from content
+                        clean_text = content.strip()
+                        m_text = re.search(r'"text"\s*:\s*"([^"]+)"', clean_text)
+                        m_em = re.search(r'"emotion"\s*:\s*"([a-zA-Z]+)"', clean_text)
+                        detected_em = m_em.group(1).lower() if m_em else "neutral"
+
+                        if m_text:
+                            clean_text = m_text.group(1)
+                        else:
+                            clean_text = re.sub(r'[{}\[\]"]', '', clean_text).strip()
+
+                        parsed = {
+                            "text": clean_text or "I am here and monitoring your home.",
+                            "emotion": detected_em,
+                            "speak": True,
+                            "confidence_status": "ANSWERABLE",
+                            "citations": [],
+                        }
+
+                    # Validate and normalize structured fields
+                    if "text" not in parsed:
+                        for k in ("response", "answer", "message", "reply", "content"):
+                            if k in parsed and isinstance(parsed[k], str) and parsed[k].strip():
+                                parsed["text"] = parsed[k]
+                                break
+                    if "text" not in parsed or not str(parsed["text"]).strip():
+                        parsed["text"] = "I am here and monitoring your home."
+                    parsed["answer"] = parsed["text"]
+
+                    raw_emotion = str(parsed.get("emotion") or "neutral").lower().strip()
+                    allowed_emotions = {"neutral", "happy", "sad", "surprised", "confused", "thinking", "concerned"}
+                    parsed["emotion"] = raw_emotion if raw_emotion in allowed_emotions else "neutral"
+                    parsed["speak"] = bool(parsed.get("speak", True))
+
+                    logger.info("[OLLAMA] Structured output: emotion='%s', speak=%s", parsed["emotion"], parsed["speak"])
                     return parsed, None
 
             except urllib.error.HTTPError as e:
-                err_msg = f"HTTP {e.code}: {e.reason}"
-                logger.warning("Ollama call failed: %s", err_msg)
-                return None, err_msg
+                _last_err = f"HTTP {e.code}: {e.reason}"
+                logger.warning("[OLLAMA] HTTP call failed: %s", _last_err)
+                return None, _last_err
             except urllib.error.URLError as e:
-                err_msg = f"URLError (connection/timeout): {e.reason}"
-                logger.warning("Ollama call failed: %s", err_msg)
-                return None, err_msg
+                _last_err = f"URLError (connection/timeout): {e.reason}"
+                logger.warning("[OLLAMA] Connection failed: %s", _last_err)
+                return None, _last_err
             except TimeoutError:
-                err_msg = f"TimeoutError: Ollama request timed out ({self.timeout_seconds}s)"
-                logger.warning("Ollama request timed out: %s", err_msg)
-                return None, err_msg
-            except json.JSONDecodeError as e:
-                _last_json_err = f"Failed to parse Ollama JSON response: {e}"
-                if attempt < _max_attempts:
-                    logger.warning(
-                        "Ollama returned unparseable JSON (attempt %d/%d), retrying: %s",
-                        attempt, _max_attempts, e,
-                    )
-                    continue
-                logger.warning("Ollama call returned invalid JSON after %d attempts: %s", _max_attempts, e)
-                return None, _last_json_err
+                _last_err = f"TimeoutError: Ollama request timed out ({self.timeout_seconds}s)"
+                logger.warning("[OLLAMA] Request timed out: %s", _last_err)
+                return None, _last_err
             except Exception as e:
-                err_msg = f"Unexpected error during Ollama invocation: {type(e).__name__}: {e}"
-                logger.warning("Ollama unexpected failure: %s", err_msg)
-                return None, err_msg
+                _last_err = f"Unexpected error during Ollama invocation: {type(e).__name__}: {e}"
+                logger.warning("[OLLAMA] Unexpected failure: %s", _last_err)
+                return None, _last_err
 
-        return None, _last_json_err or "Ollama generate failed with no error captured."
+        return None, _last_err or "Ollama generate failed with no error captured."
 
 
 

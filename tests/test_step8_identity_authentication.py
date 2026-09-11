@@ -422,7 +422,6 @@ class TestAuthAPITwoStage:
                     assert resp.status_code == 200
                     # Must NOT have atlas_session cookie
                     assert "atlas_session" not in resp.headers.get("Set-Cookie", "")
-                    # Token must be a temp_token, not a session token
                     data = resp.get_json()
                     assert "temp_token" in data
                     assert "token" not in data

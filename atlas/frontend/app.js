@@ -1434,37 +1434,18 @@
           return;
         }
 
-        // Advance to Stage 2: Biometric Face Verification
+        // Credentials verified -> Advance to Stage 2: Biometric Face Verification
         tempAuthToken = data.temp_token;
-        if (stageStep1) stageStep1.className = "stage-step done";
+        if (loginStageCredentials) loginStageCredentials.style.display = "none";
+        if (loginStageFace) loginStageFace.style.display = "block";
+        if (stageStep1) stageStep1.className = "stage-step completed";
         if (stageConnectorBar) stageConnectorBar.className = "stage-connector active";
         if (stageStep2) stageStep2.className = "stage-step active";
-
-        loginStageCredentials.style.display = "none";
-        loginStageFace.style.display = "block";
-        if (faceUserHint) {
-          faceUserHint.textContent = `Authenticating: ${data.display_name || data.username} (${data.role})`;
-        }
-
-        // Configure button text and instructions based on face enrollment status
-        if (!data.face_enrolled && data.role === "ADMIN") {
-          if (btnCaptureFace) btnCaptureFace.textContent = "CAPTURE & ENROLL ADMIN FACE";
-          if (faceStatusMsg) faceStatusMsg.textContent = "Initial setup: Capturing face will enroll your Admin biometric key.";
-        } else {
-          if (btnCaptureFace) btnCaptureFace.textContent = "CAPTURE & VERIFY FACE";
-          if (faceStatusMsg) faceStatusMsg.textContent = "Position face directly within the reticle and click capture...";
-        }
-
-        // Reset live status indicators
-        if (valCamStatus) valCamStatus.textContent = "ACTIVE / 30 FPS";
-        if (valFrameStatus) valFrameStatus.textContent = "VALID";
-        if (valFaceStatus) valFaceStatus.textContent = "READY";
-        if (valVerifyStatus) valVerifyStatus.textContent = "STANDBY";
-
-        // Refresh hardware video feed
-        if (faceVideoPreview) {
-          faceVideoPreview.src = "/api/camera/video_feed?temp_token=" + encodeURIComponent(tempAuthToken) + "&t=" + Date.now();
-        }
+        if (elLoginError) elLoginError.style.display = "none";
+        if (faceError) faceError.style.display = "none";
+        if (faceUserHint) faceUserHint.textContent = `Authenticating ${data.display_name || data.username} (${data.role || selectedRoleHint || 'ADMIN'})...`;
+        if (valVerifyStatus) valVerifyStatus.textContent = "AWAITING_CAPTURE";
+        if (faceStatusMsg) faceStatusMsg.textContent = "Position your face in the reticle and click CAPTURE & VERIFY FACE.";
 
       } catch (err) {
         elLoginError.textContent = `Network error: ${err.message}`;
@@ -1499,24 +1480,21 @@
 
         const data = await resp.json();
 
-        if (!resp.ok) {
+        if (!resp.ok || !data.face_verified) {
           btnCaptureFace.disabled = false;
-          if (valVerifyStatus) valVerifyStatus.textContent = "FAILED";
+          if (valVerifyStatus) valVerifyStatus.textContent = "DENIED";
           if (faceError) {
-            if (data.status === "CAMERA_UNAVAILABLE" || (data.details && data.details.includes("OFF"))) {
-              faceError.textContent = "Camera is currently OFF. Turn on the camera to continue biometric verification.";
-            } else {
-              faceError.textContent = data.details || data.error || "Biometric verification failed.";
-            }
+            faceError.textContent = data.details || data.error || "Face verification failed. Face does not match enrolled template.";
             faceError.style.display = "block";
           }
           if (faceStatusMsg) {
-            faceStatusMsg.textContent = "Verification unsuccessful. Please reposition your face in the reticle and try again.";
+            faceStatusMsg.textContent = "Biometric check failed. You can re-try or click RE-ENROLL FACE to register your current face.";
           }
           return;
         }
 
-        // Biometric verification success
+        // Biometric verification success -> Grant dashboard access
+        currentUser = data.user;
         if (valVerifyStatus) valVerifyStatus.textContent = "VERIFIED ✓";
         if (faceStatusMsg) faceStatusMsg.textContent = "Identity Confirmed ✓ Launching dashboard...";
 
@@ -1535,6 +1513,54 @@
           faceError.textContent = `Network error: ${err.message}`;
           faceError.style.display = "block";
         }
+      }
+    });
+  }
+
+  // Stage 2: Re-Enroll Face Button
+  const btnReEnrollFace = document.getElementById("btn-re-enroll-face");
+  if (btnReEnrollFace) {
+    btnReEnrollFace.addEventListener("click", async () => {
+      if (!tempAuthToken) {
+        if (faceError) {
+          faceError.textContent = "Authentication session expired. Please return to step 1.";
+          faceError.style.display = "block";
+        }
+        return;
+      }
+      if (faceError) faceError.style.display = "none";
+      if (faceStatusMsg) faceStatusMsg.textContent = "Capturing face from camera & computing 1856-D biometric embedding...";
+      if (valVerifyStatus) valVerifyStatus.textContent = "ENROLLING...";
+      btnReEnrollFace.disabled = true;
+
+      try {
+        const resp = await fetch("/api/auth/login/re-enroll", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ temp_token: tempAuthToken }),
+          credentials: "same-origin",
+        });
+
+        const data = await resp.json();
+        if (resp.ok) {
+          if (valVerifyStatus) valVerifyStatus.textContent = "ENROLLED ✓";
+          if (faceStatusMsg) faceStatusMsg.textContent = "New face enrolled successfully! Click CAPTURE & VERIFY FACE to log in.";
+          if (faceError) faceError.style.display = "none";
+        } else {
+          if (valVerifyStatus) valVerifyStatus.textContent = "ERROR";
+          if (faceError) {
+            faceError.textContent = data.details || data.error || "Enrollment failed.";
+            faceError.style.display = "block";
+          }
+        }
+      } catch (err) {
+        if (valVerifyStatus) valVerifyStatus.textContent = "ERROR";
+        if (faceError) {
+          faceError.textContent = `Network error: ${err.message}`;
+          faceError.style.display = "block";
+        }
+      } finally {
+        btnReEnrollFace.disabled = false;
       }
     });
   }
@@ -1705,10 +1731,81 @@
   let guidedEnrollUserName = null;
   let guidedEnrollSamplesCount = 0;
 
+  async function startBiometricEnrollmentSession(userId, userName) {
+    if (!userId) {
+      alert("No user selected for biometric enrollment.");
+      return;
+    }
+
+    guidedEnrollUserId = userId;
+    guidedEnrollUserName = userName || "User";
+    sessionStorage.setItem("atlas_active_enroll_uid", userId);
+    sessionStorage.setItem("atlas_active_enroll_name", guidedEnrollUserName);
+
+    // Reset visual sample cards
+    guidedEnrollSamplesCount = 0;
+    for (let i = 1; i <= 5; i++) {
+      const slot = document.getElementById(`sample-slot-${i}`);
+      if (slot) {
+        slot.className = "sample-slot-card";
+        slot.innerHTML = `<span class="slot-num">${i}</span> <span class="slot-stat">EMPTY</span>`;
+      }
+    }
+
+    const btnCap = document.getElementById("btn-capture-sample");
+    const btnFuse = document.getElementById("btn-fuse-and-activate");
+    const feedText = document.getElementById("enroll-sample-feedback");
+    const errText = document.getElementById("enroll-sample-error");
+    const countNum = document.getElementById("sample-count-num");
+
+    if (btnCap) {
+      btnCap.style.display = "inline-block";
+      btnCap.disabled = false;
+    }
+    if (btnFuse) btnFuse.style.display = "none";
+    if (feedText) feedText.textContent = `Connecting to camera stream for ${guidedEnrollUserName}...`;
+    if (errText) errText.style.display = "none";
+    if (countNum) countNum.textContent = "1";
+
+    // Switch panes to Step 3
+    const step1 = document.getElementById("add-step-1-pane");
+    const step2 = document.getElementById("add-step-2-pane");
+    const step3 = document.getElementById("add-step-3-pane");
+    const step4 = document.getElementById("add-step-4-pane");
+    if (step1) step1.style.display = "none";
+    if (step2) step2.style.display = "none";
+    if (step3) step3.style.display = "block";
+    if (step4) step4.style.display = "none";
+    _updateStepIndicator(3);
+
+    const enrollPreview = document.getElementById("enroll-video-preview");
+    if (enrollPreview) {
+      enrollPreview.src = "/api/camera/video_feed?t=" + Date.now();
+    }
+    if (modalAddUser) modalAddUser.style.display = "flex";
+
+    // Call backend to initialize / reset the enrollment session
+    try {
+      const resp = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/face/session/start`, {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (feedText) feedText.textContent = `Camera READY. Capture 5 distinct face angles/samples for ${data.username || guidedEnrollUserName}.`;
+      }
+    } catch (err) {
+      console.warn("Backend enrollment session start returned error:", err);
+      if (feedText) feedText.textContent = `Camera READY. Capture 5 distinct face samples for ${guidedEnrollUserName}.`;
+    }
+  }
+
   function resetGuidedEnrollmentModal() {
     guidedEnrollUserId = null;
     guidedEnrollUserName = null;
     guidedEnrollSamplesCount = 0;
+    sessionStorage.removeItem("atlas_active_enroll_uid");
+    sessionStorage.removeItem("atlas_active_enroll_name");
 
     const step1 = document.getElementById("add-step-1-pane");
     const step2 = document.getElementById("add-step-2-pane");
@@ -1921,26 +2018,11 @@
   if (btnCloseManageFace) btnCloseManageFace.addEventListener("click", () => { modalManageFace.style.display = "none"; });
 
   if (btnActionReplaceFace) {
-    btnActionReplaceFace.addEventListener("click", () => {
+    btnActionReplaceFace.addEventListener("click", async () => {
       const uid = inputFaceMgmtUserId.value;
       const name = elFaceMgmtUserName.textContent;
       modalManageFace.style.display = "none";
-
-      // Direct launch of multi-sample enrollment for this user
-      guidedEnrollUserId = uid;
-      guidedEnrollUserName = name;
-      resetGuidedEnrollmentModal();
-
-      document.getElementById("add-step-1-pane").style.display = "none";
-      document.getElementById("add-step-2-pane").style.display = "none";
-      document.getElementById("add-step-3-pane").style.display = "block";
-      _updateStepIndicator(3);
-
-      const enrollPreview = document.getElementById("enroll-video-preview");
-      if (enrollPreview) {
-        enrollPreview.src = "/api/camera/video_feed?t=" + Date.now();
-      }
-      modalAddUser.style.display = "flex";
+      await startBiometricEnrollmentSession(uid, name);
     });
   }
 
@@ -2043,15 +2125,8 @@
   // Step 2 Buttons
   const btnStartBio = document.getElementById("btn-start-biometrics");
   if (btnStartBio) {
-    btnStartBio.addEventListener("click", () => {
-      document.getElementById("add-step-2-pane").style.display = "none";
-      document.getElementById("add-step-3-pane").style.display = "block";
-      _updateStepIndicator(3);
-
-      const enrollPreview = document.getElementById("enroll-video-preview");
-      if (enrollPreview) {
-        enrollPreview.src = "/api/camera/video_feed?t=" + Date.now();
-      }
+    btnStartBio.addEventListener("click", async () => {
+      await startBiometricEnrollmentSession(guidedEnrollUserId, guidedEnrollUserName);
     });
   }
 
@@ -2068,7 +2143,16 @@
   if (btnCaptureSample) {
     btnCaptureSample.addEventListener("click", async () => {
       if (!guidedEnrollUserId) {
-        alert("No active user enrollment session.");
+        guidedEnrollUserId = sessionStorage.getItem("atlas_active_enroll_uid");
+        guidedEnrollUserName = sessionStorage.getItem("atlas_active_enroll_name");
+      }
+      if (!guidedEnrollUserId) {
+        const errEl = document.getElementById("enroll-sample-error");
+        if (errEl) {
+          errEl.textContent = "No active user enrollment session. Please select a user from User Management to begin.";
+          errEl.style.display = "block";
+        }
+        alert("No active user enrollment session. Please select a user from User Management.");
         return;
       }
       const feedback = document.getElementById("enroll-sample-feedback");
@@ -2077,11 +2161,25 @@
       if (feedback) feedback.textContent = "Acquiring live hardware frame & verifying biometric quality...";
       btnCaptureSample.disabled = true;
 
+      // Optional: grab frame from preview element if available
+      let imagePayload = "";
+      try {
+        const previewImg = document.getElementById("enroll-video-preview");
+        if (previewImg && previewImg.naturalWidth > 0 && previewImg.naturalHeight > 0) {
+          const canvas = document.createElement("canvas");
+          canvas.width = previewImg.naturalWidth;
+          canvas.height = previewImg.naturalHeight;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(previewImg, 0, 0);
+          imagePayload = canvas.toDataURL("image/jpeg", 0.92);
+        }
+      } catch (_) {}
+
       try {
         const resp = await fetch(`/api/admin/users/${encodeURIComponent(guidedEnrollUserId)}/face/sample`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
+          body: JSON.stringify(imagePayload ? { image_data: imagePayload } : {}),
           credentials: "same-origin",
         });
 
@@ -2158,6 +2256,8 @@
         }
 
         // Advance to Step 4
+        sessionStorage.removeItem("atlas_active_enroll_uid");
+        sessionStorage.removeItem("atlas_active_enroll_name");
         const finalDisplay = document.getElementById("final-user-display");
         if (finalDisplay) finalDisplay.textContent = guidedEnrollUserName || "User";
 
@@ -2185,7 +2285,7 @@
   // Reset samples button
   const btnResetSamples = document.getElementById("btn-reset-samples");
   if (btnResetSamples) {
-    btnResetSamples.addEventListener("click", () => {
+    btnResetSamples.addEventListener("click", async () => {
       guidedEnrollSamplesCount = 0;
       for (let i = 1; i <= 5; i++) {
         const slot = document.getElementById(`sample-slot-${i}`);
@@ -2205,6 +2305,15 @@
       if (btnFuse) btnFuse.style.display = "none";
       if (countNum) countNum.textContent = "1";
       if (feedback) feedback.textContent = "Samples reset. Face camera directly.";
+
+      if (guidedEnrollUserId) {
+        try {
+          await fetch(`/api/admin/users/${encodeURIComponent(guidedEnrollUserId)}/face/session/clear`, {
+            method: "POST",
+            credentials: "same-origin",
+          });
+        } catch (_) {}
+      }
     });
   }
 
@@ -2437,16 +2546,40 @@
       const isUnavail = data.confidence_status === "VISUAL_VERIFICATION_UNAVAILABLE";
       const statusBadgeClass = isGrounded ? "badge-live" : (isUnavail ? "badge-stale" : "badge-subtle");
 
-      const citationsHtml = (data.citations && data.citations.length > 0)
-        ? `<div class="chat-citations-wrap">${data.citations.map(c => `<span class="chat-cite-pill">${escapeHtml(c)}</span>`).join("")}</div>`
+      const formatCiteItem = (c) => {
+        if (!c) return "";
+        if (typeof c === "string") return escapeHtml(c);
+        if (typeof c === "object") {
+          const label = c.title || c.label || c.event || c.source || c.type;
+          if (label) return escapeHtml(label);
+          const entries = Object.entries(c).filter(([k, v]) => typeof v !== 'object' && v !== null && v !== undefined);
+          if (entries.length > 0) return escapeHtml(entries.map(([k, v]) => `${k}: ${v}`).join(" | "));
+          return escapeHtml(JSON.stringify(c));
+        }
+        return escapeHtml(String(c));
+      };
+
+      const citationsHtml = (Array.isArray(data.citations) && data.citations.length > 0)
+        ? `<div class="chat-citations-wrap">${data.citations.map(c => `<span class="chat-cite-pill">${formatCiteItem(c)}</span>`).join("")}</div>`
         : '';
+
+      const formatTraceText = (t) => {
+        if (!t) return "";
+        if (typeof t === "string") return escapeHtml(t);
+        if (typeof t === "object") {
+          return `<pre style="margin:0; font-family:var(--font-mono); font-size:11px; white-space:pre-wrap;">${escapeHtml(JSON.stringify(t, null, 2))}</pre>`;
+        }
+        return escapeHtml(String(t));
+      };
 
       const traceHtml = data.why_atlas_said_this
         ? `<details class="chat-traceability">
             <summary>Why ATLAS said this (Technical Traceability)</summary>
-            <div class="chat-trace-content">${escapeHtml(data.why_atlas_said_this)}</div>
+            <div class="chat-trace-content">${formatTraceText(data.why_atlas_said_this)}</div>
            </details>`
         : '';
+
+      const answerText = typeof data.answer === 'string' ? data.answer : (data.answer?.text || data.text || JSON.stringify(data.answer) || 'Response received.');
 
       const assistantMsgEl = document.createElement("div");
       assistantMsgEl.className = "chat-message chat-message-assistant";
@@ -2458,7 +2591,7 @@
             <span style="color: var(--text-dim);">${new Date().toLocaleTimeString()}</span>
           </div>
         </div>
-        <div class="chat-msg-body">${escapeHtml(data.answer)}</div>
+        <div class="chat-msg-body">${escapeHtml(answerText)}</div>
         ${citationsHtml}
         ${traceHtml}
       `;
@@ -2876,12 +3009,32 @@
     Confused: { icon: "🤔", label: "CONFUSED", desc: "Perception ambiguity or uncertainty threshold exceeded.", badgeClass: "badge-warning" },
   };
 
+  let companionPollInterval = null;
+
+  function startCompanionPolling() {
+    if (companionPollInterval) clearInterval(companionPollInterval);
+    fetchCompanionStatus();
+    companionPollInterval = setInterval(() => {
+      if (currentAdminTab === "companion" && currentUser?.role === "ADMIN") {
+        fetchCompanionStatus();
+      }
+    }, 1000);
+  }
+
+  function stopCompanionPolling() {
+    if (companionPollInterval) {
+      clearInterval(companionPollInterval);
+      companionPollInterval = null;
+    }
+  }
+
   function showAdminDashboardTab() {
     currentAdminTab = "dashboard";
     if (tabAdminDashboard) tabAdminDashboard.classList.add("active");
     if (tabAdminCompanion) tabAdminCompanion.classList.remove("active");
     if (viewAdmin) viewAdmin.style.display = "block";
     if (viewAdminCompanion) viewAdminCompanion.style.display = "none";
+    stopCompanionPolling();
     attachAdminLiveStream();
   }
 
@@ -2891,7 +3044,7 @@
     if (tabAdminCompanion) tabAdminCompanion.classList.add("active");
     if (viewAdmin) viewAdmin.style.display = "none";
     if (viewAdminCompanion) viewAdminCompanion.style.display = "block";
-    fetchCompanionStatus();
+    startCompanionPolling();
   }
 
   if (tabAdminDashboard) {
@@ -2920,7 +3073,55 @@
       }
     }
 
-    // 2. Hardware Hero Connection Pill
+    if (!comp) return;
+
+    // 0. Update ATLAS COMPANION Command Interface Status Strip
+    const elCmdRobotDot = document.getElementById("comp-robot-dot");
+    const elCmdRobotVal = document.getElementById("comp-robot-val");
+    if (elCmdRobotVal) {
+      elCmdRobotVal.textContent = comp.connected ? "Connected" : "Disconnected";
+      elCmdRobotVal.style.color = comp.connected ? "#22c55e" : "#ef4444";
+    }
+    if (elCmdRobotDot) {
+      elCmdRobotDot.style.color = comp.connected ? "#22c55e" : "#ef4444";
+    }
+
+    const elCmdOllamaDot = document.getElementById("comp-ollama-dot");
+    const elCmdOllamaVal = document.getElementById("comp-ollama-val");
+    if (elCmdOllamaVal) {
+      const isOllamaOnline = Boolean(comp.ollama_online);
+      elCmdOllamaVal.textContent = isOllamaOnline ? "Online" : "Offline";
+      elCmdOllamaVal.style.color = isOllamaOnline ? "#22c55e" : "#ef4444";
+    }
+    if (elCmdOllamaDot) {
+      elCmdOllamaDot.style.color = comp.ollama_online ? "#22c55e" : "#ef4444";
+    }
+
+    const elCmdStateDot = document.getElementById("comp-state-dot");
+    const elCmdStateVal = document.getElementById("comp-state-val");
+    if (elCmdStateVal) {
+      let dispState = comp.is_speaking ? "Speaking" : (comp.state || "Idle");
+      if (comp.active_task && (comp.active_task.includes("Processing") || comp.active_task.includes("Thinking"))) {
+        dispState = "Thinking";
+      }
+      elCmdStateVal.textContent = dispState;
+      const stateColors = {
+        Idle: "#38bdf8",
+        Listening: "#fbbf24",
+        Thinking: "#c084fc",
+        Speaking: "#22c55e",
+        Happy: "#22c55e",
+        Sad: "#94a3b8",
+        Surprised: "#f59e0b",
+        Confused: "#f87171",
+        Concerned: "#f97316",
+      };
+      const col = stateColors[dispState] || "#38bdf8";
+      elCmdStateVal.style.color = col;
+      if (elCmdStateDot) elCmdStateDot.style.color = col;
+    }
+
+    // 1. Hardware Hero Connection Pill
     const pill = document.getElementById("companion-conn-pill");
     const pillText = document.getElementById("companion-conn-text");
     if (pill && pillText) {
@@ -2949,8 +3150,19 @@
       elPkts.textContent = `${total} PKTS (${comp.packets_sent || 0} TX / ${comp.packets_received || 0} RX)`;
     }
 
-    const elVoice = document.getElementById("comp-metric-voice");
-    if (elVoice) elVoice.textContent = formatBytes(comp.audio_bytes_sent);
+    const elAuthBadge = document.getElementById("comp-auth-status-badge");
+    if (elAuthBadge) {
+      if (currentUser && (currentUser.role === "ADMIN" || currentUser.is_admin)) {
+        elAuthBadge.className = "badge badge-live";
+        elAuthBadge.textContent = `ADMIN: ${currentUser.display_name || currentUser.username} (AUTHENTICATED)`;
+      } else if (currentUser) {
+        elAuthBadge.className = "badge badge-subtle";
+        elAuthBadge.textContent = `USER: ${currentUser.display_name || currentUser.username}`;
+      } else {
+        elAuthBadge.className = "badge badge-error";
+        elAuthBadge.textContent = "AUTH: NOT LOGGED IN";
+      }
+    }
 
     const elLastSeen = document.getElementById("companion-last-seen");
     if (elLastSeen) {
@@ -2960,31 +3172,50 @@
     }
 
     // 4. Affective State Card & Avatar
-    const stateName = comp.state || "Idle";
+    const stateName = comp.affective_state || comp.state || "Idle";
+    const robotState = comp.robot_state || (comp.is_speaking ? "Speaking" : (comp.connected ? "Idle" : "Offline"));
     const stateMeta = COMPANION_STATE_META[stateName] || COMPANION_STATE_META.Idle;
     const stateCard = document.getElementById("companion-state-container");
     const avatarIcon = document.getElementById("companion-avatar-icon");
     const stateLabel = document.getElementById("companion-state-label");
+    const robotLabel = document.getElementById("companion-robot-label");
     const stateDesc = document.getElementById("companion-state-description");
 
-    if (comp.is_speaking) {
-      if (stateCard) stateCard.className = "companion-state-card state-speaking";
-      if (avatarIcon) avatarIcon.textContent = "🗣️";
-      if (stateLabel) {
-        stateLabel.textContent = "SPEAKING (GPIO25 DAC)";
-        stateLabel.className = "companion-state-pill badge badge-live";
+    // Update synchronized STATE and ROBOT indicators
+    if (stateLabel) {
+      stateLabel.textContent = stateName.toUpperCase();
+      stateLabel.className = `badge ${stateMeta.badgeClass || 'badge-live'}`;
+    }
+
+    if (robotLabel) {
+      robotLabel.textContent = robotState.toUpperCase();
+      if (comp.is_speaking) {
+        robotLabel.className = "badge badge-live";
+      } else if (!comp.connected) {
+        robotLabel.className = "badge badge-error";
+      } else {
+        robotLabel.className = "badge badge-subtle";
       }
-      if (stateDesc) stateDesc.textContent = "Physical robot is actively playing 16kHz audio over GPIO25 DAC.";
+    }
+
+    if (comp.is_speaking) {
+      if (stateCard) stateCard.className = `companion-state-card state-speaking state-${stateName.toLowerCase()}`;
+      if (avatarIcon) avatarIcon.textContent = "🗣️";
+      if (stateDesc) stateDesc.textContent = "Physical robot is actively speaking over GPIO25 DAC.";
     } else {
       if (stateCard) {
         stateCard.className = `companion-state-card state-${stateName.toLowerCase()}`;
       }
       if (avatarIcon) avatarIcon.textContent = stateMeta.icon;
-      if (stateLabel) {
-        stateLabel.textContent = stateMeta.label;
-        stateLabel.className = `companion-state-pill badge ${stateMeta.badgeClass}`;
-      }
       if (stateDesc) stateDesc.textContent = stateMeta.desc;
+    }
+
+    // Synchronize chat message badges when robot finishes speaking
+    if (!comp.is_speaking) {
+      document.querySelectorAll(".comp-active-speaking-badge").forEach((el) => {
+        el.textContent = "ROBOT: Idle";
+        el.className = "badge badge-subtle";
+      });
     }
 
     // Active Task Banner
@@ -3075,6 +3306,37 @@
     });
   }
 
+  // Diagnostics Servo Test button (90 -> 60 -> 120 -> 90)
+  const btnServoTest = document.getElementById("btn-servo-test");
+  if (btnServoTest) {
+    btnServoTest.addEventListener("click", async () => {
+      btnServoTest.disabled = true;
+      const origContent = btnServoTest.innerHTML;
+      btnServoTest.innerHTML = `<span>⏳</span> SERVO MOVING...`;
+
+      try {
+        const resp = await fetch("/api/admin/companion/servo_test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          fetchCompanionStatus();
+        } else {
+          alert(`Servo test error: ${data.details || data.error}`);
+        }
+      } catch (err) {
+        alert(`Failed to trigger servo test: ${err.message}`);
+      } finally {
+        setTimeout(() => {
+          btnServoTest.disabled = false;
+          btnServoTest.innerHTML = origContent;
+        }, 3000);
+      }
+    });
+  }
+
   // Direct Voice Synthesis & Streaming Test button
   const btnDirectSpeak = document.getElementById("btn-companion-direct-speak");
   const inputDirectSpeak = document.getElementById("companion-speak-input");
@@ -3153,11 +3415,223 @@
     });
   });
 
+  // Format Grounding Context: renders structured, human-readable bullet points (never [object Object])
+  function formatGroundingHtml(citations) {
+    if (!Array.isArray(citations) || citations.length === 0) return "";
+
+    const items = citations.map((c) => {
+      if (typeof c === "string") {
+        return `<li>${escapeHtml(c)}</li>`;
+      }
+      if (c && typeof c === "object") {
+        const parts = [];
+        if (c.source || c.type) {
+          parts.push(`<strong>Source:</strong> ${escapeHtml(c.source || c.type)}`);
+        }
+        if (c.event || c.label) {
+          parts.push(`<strong>Event:</strong> ${escapeHtml(c.event || c.label)}`);
+        }
+        if (c.time) {
+          parts.push(`<strong>Time:</strong> ${escapeHtml(c.time)}`);
+        }
+        if (c.confidence) {
+          parts.push(`<strong>Confidence:</strong> ${escapeHtml(String(c.confidence))}`);
+        }
+        if (parts.length === 0) {
+          const fallbackParts = Object.entries(c)
+            .filter(([k, v]) => v !== undefined && v !== null && typeof v !== "object")
+            .map(([k, v]) => `<strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}`);
+          if (fallbackParts.length > 0) {
+            return `<li>${fallbackParts.join(" &bull; ")}</li>`;
+          }
+          return `<li><strong>Context:</strong> Verified ATLAS observation</li>`;
+        }
+        return `<li>${parts.join(" &bull; ")}</li>`;
+      }
+      return `<li>${escapeHtml(String(c))}</li>`;
+    }).join("");
+
+    return `
+      <div class="companion-grounding-block">
+        <div class="companion-grounding-title">
+          <span>🔍</span> GROUNDING CONTEXT
+        </div>
+        <ul class="companion-grounding-list">
+          ${items}
+        </ul>
+      </div>
+    `;
+  }
+
   // Companion Chat Form Submit
   const companionChatForm = document.getElementById("companion-chat-form");
   const companionChatInput = document.getElementById("companion-chat-input");
   const companionChatMessages = document.getElementById("companion-chat-messages");
   const btnCompanionChatSend = document.getElementById("btn-companion-chat-send");
+  const btnCompanionMic = document.getElementById("btn-companion-mic");
+  const micStatusLabel = document.getElementById("companion-mic-status");
+  const micIcon = document.getElementById("companion-mic-icon");
+  const voiceFeedback = document.getElementById("companion-voice-feedback");
+
+  // Voice Feedback banner helper
+  function setVoiceFeedback(msg, isError = false) {
+    if (!voiceFeedback) return;
+    if (!msg) {
+      voiceFeedback.style.display = "none";
+      return;
+    }
+    voiceFeedback.style.display = "block";
+    voiceFeedback.className = isError ? "badge badge-error" : "badge badge-live";
+    voiceFeedback.style.padding = "6px 10px";
+    voiceFeedback.style.fontSize = "11px";
+    voiceFeedback.style.fontFamily = "var(--font-mono)";
+    voiceFeedback.textContent = msg;
+    if (!isError) {
+      setTimeout(() => {
+        if (voiceFeedback) voiceFeedback.style.display = "none";
+      }, 4500);
+    }
+  }
+
+  // Update Microphone State: IDLE, LISTENING, TRANSCRIBING, SENDING
+  function updateMicState(state) {
+    if (!btnCompanionMic || !micStatusLabel) return;
+    btnCompanionMic.classList.remove("mic-listening", "mic-transcribing", "mic-sending");
+
+    if (state === "LISTENING") {
+      btnCompanionMic.classList.add("mic-listening");
+      micStatusLabel.textContent = "LISTENING";
+      if (micIcon) micIcon.textContent = "🔴";
+    } else if (state === "TRANSCRIBING") {
+      btnCompanionMic.classList.add("mic-transcribing");
+      micStatusLabel.textContent = "TRANSCRIBING";
+      if (micIcon) micIcon.textContent = "⏳";
+    } else if (state === "SENDING") {
+      btnCompanionMic.classList.add("mic-sending");
+      micStatusLabel.textContent = "SENDING";
+      if (micIcon) micIcon.textContent = "🚀";
+    } else {
+      micStatusLabel.textContent = "IDLE";
+      if (micIcon) micIcon.textContent = "🎙️";
+    }
+  }
+
+  // Real Browser Speech Recognition (Web Speech API)
+  const BrowserSpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let activeRecognition = null;
+  let isMicActive = false;
+
+  if (btnCompanionMic) {
+    if (!BrowserSpeechRecognition) {
+      btnCompanionMic.title = "Speech recognition is not natively supported in this browser. Please use Chrome, Edge, or Chromium.";
+      btnCompanionMic.addEventListener("click", () => {
+        setVoiceFeedback("Speech recognition is not natively supported in this browser. Please type your message or switch to Chrome/Edge.", true);
+      });
+    } else {
+      btnCompanionMic.addEventListener("click", () => {
+        if (isMicActive) {
+          if (activeRecognition) {
+            try { activeRecognition.stop(); } catch (err) {}
+          }
+          isMicActive = false;
+          updateMicState("IDLE");
+          setVoiceFeedback("Microphone deactivated.", false);
+          return;
+        }
+
+        try {
+          activeRecognition = new BrowserSpeechRecognition();
+          activeRecognition.continuous = false;
+          activeRecognition.interimResults = true;
+          activeRecognition.lang = "en-US";
+
+          activeRecognition.onstart = () => {
+            isMicActive = true;
+            updateMicState("LISTENING");
+            setVoiceFeedback("Listening... Speak clearly to ATLAS.", false);
+            // Put physical robot into Listening mode immediately
+            fetch("/api/admin/companion/state", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ state: "Listening" }),
+              credentials: "same-origin",
+            }).catch(() => {});
+            const elCmdState = document.getElementById("comp-state-val");
+            if (elCmdState) {
+              elCmdState.textContent = "Listening";
+              elCmdState.style.color = "#fbbf24";
+            }
+          };
+
+          activeRecognition.onspeechstart = () => {
+            updateMicState("LISTENING");
+          };
+
+          activeRecognition.onspeechend = () => {
+            updateMicState("TRANSCRIBING");
+          };
+
+          activeRecognition.onresult = (event) => {
+            let interimTranscript = "";
+            let finalTranscript = "";
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+              const res = event.results[i];
+              if (res.isFinal) {
+                finalTranscript += res[0].transcript;
+              } else {
+                interimTranscript += res[0].transcript;
+              }
+            }
+
+            if (companionChatInput) {
+              companionChatInput.value = finalTranscript || interimTranscript;
+            }
+
+            if (finalTranscript) {
+              const cleanFinal = finalTranscript.trim();
+              if (cleanFinal && companionChatInput) {
+                companionChatInput.value = cleanFinal;
+                updateMicState("SENDING");
+                setVoiceFeedback(`Sending voice query: "${cleanFinal}"`, false);
+                // Dispatch form submission automatically
+                setTimeout(() => {
+                  updateMicState("IDLE");
+                  if (companionChatForm) {
+                    companionChatForm.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+                  }
+                }, 350);
+              }
+            }
+          };
+
+          activeRecognition.onerror = (event) => {
+            isMicActive = false;
+            updateMicState("IDLE");
+            console.warn("Browser SpeechRecognition error:", event.error);
+            if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+              setVoiceFeedback("Microphone access was denied. Please allow microphone permissions in browser settings.", true);
+            } else if (event.error === "no-speech") {
+              setVoiceFeedback("No speech detected. Please click the mic and speak again.", false);
+            } else {
+              setVoiceFeedback(`Speech recognition error (${event.error}). Please type your message.`, true);
+            }
+          };
+
+          activeRecognition.onend = () => {
+            isMicActive = false;
+            updateMicState("IDLE");
+          };
+
+          activeRecognition.start();
+        } catch (err) {
+          isMicActive = false;
+          updateMicState("IDLE");
+          setVoiceFeedback(`Failed to start microphone: ${err.message}`, true);
+        }
+      });
+    }
+  }
 
   if (companionChatForm && companionChatInput && companionChatMessages) {
     companionChatForm.addEventListener("submit", async (e) => {
@@ -3165,11 +3639,11 @@
       const message = companionChatInput.value.trim();
       if (!message) return;
 
-      // 1. Append User Message
+      // 1. Append User Message with sender YOU
       const userMsgHtml = `
         <div class="chat-message chat-message-user">
           <div class="chat-msg-header">
-            <span class="chat-sender">${escapeHtml(currentUser?.display_name || "ADMINISTRATOR")}</span>
+            <span class="chat-sender">YOU</span>
             <span class="chat-msg-time">${new Date().toLocaleTimeString()}</span>
           </div>
           <div class="chat-msg-body">${escapeHtml(message)}</div>
@@ -3183,16 +3657,27 @@
       const placeholderHtml = `
         <div class="chat-message chat-message-assistant" id="${placeholderId}">
           <div class="chat-msg-header">
-            <span class="chat-sender">ATLAS COMPANION</span>
-            <span class="badge badge-loading" style="font-size: 9px;">THINKING &amp; COMMUNICATING...</span>
+            <span class="chat-sender">ATLAS</span>
+            <div class="chat-companion-meta" style="display: flex; gap: 8px; align-items: center;">
+              <span class="badge badge-loading" style="font-size: 9px;">State: <strong>Thinking</strong></span>
+              <span class="badge badge-loading" style="font-size: 9px;">Robot: <strong>Thinking</strong></span>
+            </div>
+            <span class="chat-msg-time">${new Date().toLocaleTimeString()}</span>
           </div>
           <div class="chat-msg-body" style="color: var(--text-dim); font-style: italic;">
-            Analyzing residential context and dispatching reaction to physical robot...
+            ATLAS is thinking...
           </div>
         </div>
       `;
       companionChatMessages.insertAdjacentHTML("beforeend", placeholderHtml);
       companionChatMessages.scrollTop = companionChatMessages.scrollHeight;
+
+      // Update Command Interface state strip to Thinking
+      const elCmdState = document.getElementById("comp-state-val");
+      if (elCmdState) {
+        elCmdState.textContent = "Thinking";
+        elCmdState.style.color = "#c084fc";
+      }
 
       if (btnCompanionChatSend) btnCompanionChatSend.disabled = true;
 
@@ -3207,47 +3692,85 @@
         const data = await resp.json();
         const placeholder = document.getElementById(placeholderId);
 
-        if (resp.ok) {
-          const reactionBadge = data.companion_reaction
-            ? `<span class="badge badge-live" style="font-size: 9px; margin-left: 6px;">EXPRESSION: ${escapeHtml(data.companion_reaction.toUpperCase())}</span>`
-            : "";
-          const hardwareBadge = data.dispatched_to_hardware
-            ? `<span class="badge badge-live" style="font-size: 9px; margin-left: 6px;">DISPATCHED TO COM5</span>`
-            : `<span class="badge badge-subtle" style="font-size: 9px; margin-left: 6px;">OFFLINE BUS</span>`;
-          const audioBadge = data.audio_duration_seconds
-            ? `<span class="badge badge-live" style="font-size: 9px; margin-left: 6px;">VOICE: ${data.audio_duration_seconds}s (${formatBytes(data.audio_pcm_bytes)})</span>`
-            : "";
+        if (resp.ok && data.status === "ok") {
+          const rawEmotion = (data.emotion || data.state || "neutral").toLowerCase();
+          const isSpeaking = Boolean(data.is_speaking || data.robot_state === "Speaking");
+          const robotVal = isSpeaking ? "Speaking" : (data.robot_state || "Idle");
+          const robotBadgeClass = isSpeaking ? "badge-live comp-active-speaking-badge" : "badge-subtle";
+          const robotColor = isSpeaking ? "#22c55e" : "#94a3b8";
 
-          const citationsHtml = Array.isArray(data.citations) && data.citations.length > 0
-            ? `<div style="margin-top: 8px; font-size: 11px; color: var(--accent-cyan); font-family: var(--font-mono);">
-                <strong>GROUNDING:</strong> ${data.citations.map(c => `[${escapeHtml(c)}]`).join(" ")}
-               </div>`
-            : "";
+          // Format clean Grounding Context HTML
+          const citationsHtml = formatGroundingHtml(data.citations);
+
+          let errorWarningHtml = "";
+          if (data.hardware_error) {
+            errorWarningHtml += `<div class="badge badge-error" style="display: block; width: fit-content; margin-top: 8px; font-size: 10px;">⚠️ ESP32 DISCONNECTED: ${escapeHtml(data.hardware_error)}</div>`;
+          }
+          if (data.audio_error) {
+            errorWarningHtml += `<div class="badge badge-error" style="display: block; width: fit-content; margin-top: 8px; font-size: 10px;">⚠️ TTS / AUDIO ERROR: ${escapeHtml(data.audio_error)}</div>`;
+          }
+
+          const answerText = data.text || data.answer || "I am currently monitoring your home.";
 
           if (placeholder) {
             placeholder.innerHTML = `
               <div class="chat-msg-header">
-                <span class="chat-sender">ATLAS COMPANION</span>
-                ${reactionBadge}
-                ${hardwareBadge}
-                ${audioBadge}
+                <span class="chat-sender">ATLAS</span>
+                <div class="chat-companion-meta" style="display: flex; gap: 8px; align-items: center;">
+                  <span class="badge badge-subtle" style="font-size: 9px;">Emotion: <strong style="color: #38bdf8;">${escapeHtml(rawEmotion.toUpperCase())}</strong></span>
+                  <span class="badge ${robotBadgeClass}" style="font-size: 9px;">Robot: <strong style="color: ${robotColor};">${escapeHtml(robotVal)}</strong></span>
+                  ${data.dispatched_to_hardware ? '<span class="badge badge-live" style="font-size: 9px;">COM5 DISPATCHED</span>' : '<span class="badge badge-error" style="font-size: 9px;">HARDWARE OFFLINE</span>'}
+                  ${data.audio_duration_seconds ? `<span class="badge badge-subtle" style="font-size: 9px;">VOICE: ${data.audio_duration_seconds}s</span>` : ''}
+                </div>
                 <span class="chat-msg-time">${new Date().toLocaleTimeString()}</span>
               </div>
               <div class="chat-msg-body">
-                ${escapeHtml(data.answer)}
-                ${citationsHtml}
+                ${escapeHtml(answerText)}
               </div>
+              ${citationsHtml}
+              ${errorWarningHtml}
             `;
           }
+
+          // Dynamically reflect LLM emotion on companion card widget
+          const stateVal = rawEmotion;
+          const stateCard = document.getElementById("companion-state-container");
+          const stateLabel = document.getElementById("companion-state-label");
+          const avatarIcon = document.getElementById("companion-avatar-icon");
+          const emotionIconMap = {
+            idle: "🤖",
+            neutral: "🤖",
+            happy: "😊",
+            sad: "😢",
+            surprised: "😲",
+            confused: "🤔",
+            thinking: "🧠",
+            speaking: "🗣️",
+            listening: "🎧",
+            concerned: "⚠️",
+          };
+          if (stateCard) {
+            stateCard.className = `companion-state-card state-${stateVal.toLowerCase()}`;
+          }
+          if (stateLabel) {
+            stateLabel.textContent = stateVal.toUpperCase();
+          }
+          if (avatarIcon) {
+            avatarIcon.textContent = emotionIconMap[stateVal.toLowerCase()] || "🤖";
+          }
         } else {
+          // Failure handling: ATLAS Core failure or API error
           if (placeholder) {
+            const errTitle = data.error === "ATLAS_CORE_FAILURE" ? "ATLAS CORE FAILURE" : "COMPANION ERROR";
             placeholder.innerHTML = `
               <div class="chat-msg-header">
-                <span class="chat-sender">ATLAS COMPANION</span>
-                <span class="badge badge-error" style="font-size: 9px;">ERROR</span>
+                <span class="chat-sender">ATLAS</span>
+                <span class="badge badge-error" style="font-size: 9px; margin-left: 6px;">STATE: Confused</span>
+                <span class="badge badge-subtle" style="font-size: 9px; margin-left: 6px;">ROBOT: Idle</span>
+                <span class="badge badge-error" style="font-size: 9px; margin-left: 6px;">${escapeHtml(errTitle)}</span>
               </div>
               <div class="chat-msg-body" style="color: #f87171;">
-                ${escapeHtml(data.details || data.error || "Failed to process request.")}
+                <strong>${escapeHtml(errTitle)}:</strong> ${escapeHtml(data.details || data.error || "Request failed.")}
               </div>
             `;
           }
@@ -3257,11 +3780,12 @@
         if (placeholder) {
           placeholder.innerHTML = `
             <div class="chat-msg-header">
-              <span class="chat-sender">ATLAS COMPANION</span>
-              <span class="badge badge-error" style="font-size: 9px;">NETWORK ERROR</span>
+              <span class="chat-sender">ATLAS</span>
+              <span class="badge badge-error" style="font-size: 9px; margin-left: 6px;">COMMUNICATION ERROR</span>
+              <span class="badge badge-subtle" style="font-size: 9px; margin-left: 6px;">ROBOT: Idle</span>
             </div>
             <div class="chat-msg-body" style="color: #f87171;">
-              ${escapeHtml(err.message)}
+              <strong>NETWORK / API ERROR:</strong> Communication with ATLAS Companion Bridge failed: ${escapeHtml(err.message)}
             </div>
           `;
         }
